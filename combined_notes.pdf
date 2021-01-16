@@ -1,0 +1,3209 @@
+# MY NOTES 
+`Serialization`
+This is the process where an Object or Data Structure is translated into a format suitable for transferral over a network or storage.
+In JS, you can serialize an object into a JSON string by calling the function `JSON.stringify`
+CSS values are serialized by calling the function `CSSStyleDeclaration.getPropertyValue()`
+
+# Instance Public Methods
+`rescue_from`
+Receives a series of exception classes or class names and a trailing :with option with the name of a method or a Proc object to be called to handle them. Alternatively a block can be given. 
+
+`status: not_found`
+404 Error 
+The server cannot find the requested resource 
+
+`fetch`
+The only thing that causes fetch to return a rejected promise and not a fullfilled promise is a network error. 
+Any kind of response from the server counts as a resolved promise. In order to make sure our code doesn't break if something occurs on the server we check if the response is OK and we setup our API to send back a status code that isn't ok. 
+
+`$ rails new rails-js-todolist-backend -–api -–database=postgresql -T`
+
+`$ rails new rails-js-todolist-backend -–api -–database=postgresql -T`
+--api  Specifying  api framework ?? 
+--database=postgresql  We're using postgresql because SQLite is only local 
+-T skips mini test 
+
+`Application < ActionController::API`
+We're inheriting from ActionController::API instead of ActionController::Base because don't need middleware, cookies, etc. We are using it specifically for API. 
+
+`gem rack-cors`
+This is a gem that enables cross origin resource sharing. 
+If this gem isn't enabled, the rails server will only respond to requests that come from the same origin. 
+
+```rb
+Rails.application.config.middleware.insert_before 0, Rack::Cors do 
+  allow do
+    origins "*",  
+    resource "*",
+      headers: :any,
+      expose: ["Authorization"],  #Exposing a header called "Authorization", we are specifying where the JSON web tokes are going to be included in requests and allow devise to recognize the currently logged in user. 
+      methods: [:get, :post, :put, :patch, :delete, :options, :head]
+    end
+  end  
+
+#Added 3 gems 
+gem 'devise'    #Creates routes related to authentication 
+gem 'devise-jwt'
+gem 'fast_jsonapi'
+
+#Install devise 
+`rails generate devise:install`  
+
+#Added these to development.rb 
+#Set to an empty array because we don't need devise to do any redirects, we are using it as an api only mode. 
+`config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }`
+`config.navigational_formats = []`  
+
+#Generate The User Model, that also creates migration, model and routes 
+`rails generate devise User`
+
+#If you are using postgresql you will need to run: 
+`rails db:create`
+`rails db:migrate` 
+
+#If you don't have postgres installed, you can get it here: 
+# http://www.postgresql.com 
+
+
+#Generating Controllers (includes comments)
+`rails g devise:controllers users -c sessions registrations`
+
+#The super keyword
+
+def new
+    super  
+end 
+``` 
+If we see the `super` keyword in a class, it means that we're calling the method as it's defined in the superclass. The superclass is where it's inheriting from. 
+`Devise::RegistrationsController` 
+This allows us to add without losing information.  
+
+`respond_to :json`
+We use this to specify that the devise controllers will be responding to JSON requests
+
+```rb
+
+Rails.application.routes.draw do
+  resources :tasks
+  resources :todo_lists
+  devise_for :users, path: '', path_names: {     
+      #removing the path "" so we can remove routes starting with users and have it start with login logout and signup
+    sign_in: 'login',
+    sign_out: 'logout',
+    registration: 'signup'
+  },
+  controllers: {
+    sessions: 'users/sessions',
+    registrations: 'users/registrations'
+  }
+end
+
+config.jwt do |jwt|
+    jwt.secret = Rails.application.credentials.fetch(:secret_key_base) 
+    # Fetching the :secret_key_base from our encrypted credentials file. With the Rails 6 App this will be created by default. This is the secret that will be used to sign in all of the tokens. 
+    jwt.dispatch_requests = [
+      ['POST', %r{^/login$}]
+    ]
+    jwt.revocation_requests = [
+      ['DELETE', %r{^/logout$}]
+    ]
+    jwt.expiration_time = 30.minutes.to_i  
+    # Expiration time for the token is 30 minutes. 
+end
+
+
+# REVOCATION STRATEGY 
+class AddJtiToUsers < ActiveRecord::Migration[6.0]
+  def change
+    add_column :users, :jti, :string, null: false
+    add_index :users, :jti, unique: true
+  end
+end
+
+# To add this, we can run 
+# rails g migration addJtiToUsers jti:string:index:unique 
+
+class User < ApplicationRecord
+  include Devise::JWT::RevocationStrategies::JTIMatcher      
+  #add this line to configure the User model. 
+  devise :database_authenticatable, :registerable,
+         :recoverable, :rememberable, :validatable,
+         :jwt_authenticatable, jwt_revocation_strategy: self
+
+  has_many :todo_lists #We're not using has_many through: because we added references 
+  has_many :tasks
+end
+
+```
+After that's complete run 
+`rails db:migrate`
+
+Generate Serializer For Users 
+`rails generate serializer user id email created_at` 
+
+```rb 
+class UserSerializer
+  include FastJsonapi::ObjectSerializer
+  attributes :id, :email, :created_at
+end
+
+class Users::SessionsController < Devise::SessionsController
+  respond_to :json    
+  private
+
+# To make use of our UserSerializer we go into the SessionsController and make a respond_with method that will tell devise that when we get a new registration to respond with json. "resource" is a stand in for the user. If there is a successful registration we give a successful response with a 200 status code and get some user data back. If it wasn't successful registration send an error message. This will help us tell the difference between a successful login or not.   
+
+  def respond_with(resource, _opts = {})    
+    render json: {
+    status: {code: 200, message: 'Logged in successfully.'},
+    data: UserSerializer.new(resource).serializable_hash[:data][:attributes]
+    }
+  end
+
+  def respond_to_on_destroy
+    if current_user 
+      render json: {
+        status: 200,
+        message: "logged out successfully"
+      }, status: :ok
+    else
+      render json: { 
+        status: 401,
+        message: "Couldn't find an active session."
+      }, status: :unauthorized
+    end
+  end
+end
+
+class Users::RegistrationsController < Devise::RegistrationsController
+  respond_to :json
+  private
+  
+  
+# We create a new instance of the serializer. We use the method serializable_hash to pull out the data key and all of the attributes that come with the serializer. This is modifying what we normally see from the fast json api. It allows us to show just the information that we want to. 
+
+  def respond_with(resource, _opts = {})
+    if resource.persisted?
+      render json: {
+        status: {code: 200, message: 'Logged in sucessfully.'},
+        data: UserSerializer.new(resource).serializable_hash[:data][:attributes]
+        }
+    else
+      render json: {
+        status: {message: "User couldn't be created successfully. #{resource.errors.full_messages.to_sentence}"}
+      }, status: :unprocessable_entity
+    end
+  end
+end
+
+before_action :authenticate_user!    
+#Add this line to any controller to authenticate the user 
+#To test it, you can try this in the browser console
+fetch('http://localhost:3000/signup', {     
+    #Sending a post request to sign up via the registration controller create route.  
+    method: 'post',    
+    headers: {
+      'Content-Type': 'application/json'   #Specifying in the header that we want JSON back 
+    },
+    body: JSON.stringify(
+        { 
+            "user": {  #Specifying what the user and password is 
+                "email" : "test@test.com",
+                "password" : "password"
+            }
+        }
+    )
+})
+  .then(res => {  #If the response is ok (200 status code in the response) then we log the authorization header.  
+    if(res.ok) {
+      console.log(res.headers.get('Authorization'))
+      localStorage.setItem('token', res.headers.get('Authorization'))  
+      #Storing the token in the browser's local storage. When we send additional requests we can send it again. This is similar to the cookie authentication method. The token is used to recognized who the user is and respond accordingly.   
+      return res.json()  #Will return with JSON if it's successful otherwise it will return an error 
+    } else {
+      throw new Error(res);
+    }
+  })
+  .then(json => console.dir(json))  #Successful Response 
+  .catch(err => console.error(err))   #Failed Respose produces an error 
+```
+```rb
+
+# Rails Javascript Todo List App Backend 
+`TodoList Model` 
+belongs_to :user 
+has_many :tasks 
+
+t.string :name 
+t.references :user 
+
+`Task Model`  
+belongs_to :user
+belongs_to :todo_list 
+
+t.string :name 
+t.text :notes 
+t.boolean :complete 
+t.references :user 
+t.references :todo_list 
+
+# This will be a one to many relationship. 
+# When we will be building our Front End side of the application, all of the records that we will create are going to belong to the current user, which is the first user we have created User.first 
+# We will focus on the app from one user's perspective, we're building it in such a way that if we have the ability to switch users all of the api end points will respond with the correct data because we have been using current user the whole time. 
+
+`Scaffold`
+# If you have an api only app, it's a good idea to use a scaffold generator. It will be fully restful and have no mistakes. Make sure to have a plan. 
+
+`rails g scaffold TodoList name user:references` 
+# When we run this command we will get the following: 
+
+`todo_lists_controller.rb`    
+# filled out with the controller actions along with strong parameters 
+# Some changes are still necessary because we want to use serializers  
+
+
+`todo_list.rb` 
+class TodoList < ApplicationRecord
+  belongs_to :user
+  has_many :tasks, dependent: :destroy
+  validates :name, presence: true
+end
+
+`routes.rb` 
+Rails.application.routes.draw do
+  resources :tasks
+  resources :todo_lists
+  devise_for :users, path: '', path_names: {
+    sign_in: 'login',
+    sign_out: 'logout',
+    registration: 'signup'
+  },
+  controllers: {
+    sessions: 'users/sessions',
+    registrations: 'users/registrations'
+  }
+end
+
+`20201230135017_create_todo_lists.rb`
+class CreateTodoLists < ActiveRecord::Migration[6.0]
+  def change
+    create_table :todo_lists do |t|
+      t.string :name
+      t.references :user, null: false, foreign_key: true
+
+      t.timestamps
+    end
+  end
+end
+
+#Then we run rails db:migrate to commit it to the schema 
+`rails g scaffold Task name notes:text complete:boolean user:references todo_list:references`  
+
+
+`tasks_controller.rb`    
+# filled out with the controller actions along with strong parameters. Some changes are still necessary because we want to use serializers  
+
+class Task < ApplicationRecord
+  belongs_to :user
+  belongs_to :todo_list
+  validates :name, presence: true
+  validates :completed, inclusion: { in: [true, false] }
+end
+
+`routes.rb` 
+Rails.application.routes.draw do
+  resources :tasks
+  resources :todo_lists
+  devise_for :users, path: '', path_names: {
+    sign_in: 'login',
+    sign_out: 'logout',
+    registration: 'signup'
+  },
+  controllers: {
+    sessions: 'users/sessions',
+    registrations: 'users/registrations'
+  }
+end
+
+`20201210235217_create_tasks.rb` 
+class CreateTasks < ActiveRecord::Migration[6.0]
+  def change
+    create_table :tasks do |t|
+      t.string :name
+      t.text :notes
+      t.boolean :complete
+      t.references :user, null: false, foreign_key: true
+      t.references :todo_list, null: false, foreign_key: true
+
+      t.timestamps
+    end
+  end
+end
+
+`seeds.rb`
+user = User.first 
+study_tasks = user.todo_lists.find_or_create_by(name: "Study Tasks")
+task_1 = user.tasks.find_or_create_by(name: "learn about promises", completed: false, todo_list_id: study_tasks.id)
+```
+```html 
+
+<!DOCTYPE html>   <!-- Styling with Tailwind CSS -->
+<html lang="en">   
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo List</title>
+  <link href="https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css" integrity="sha512-+4zCK9k+qNFUR5X+cKL9EIR+ZOhtIloNl9GIKS57V1MyNsYpYcUrUeQc9vNfzsWfV28IaLL3i96P9sdNyeRssA==" crossorigin="anonymous" />
+</head>
+<body>
+  <div class="container mx-auto sm:grid grid-cols-3 gap-4 my-4">
+    <!-- Outer container that's centered.  mx-auto auto horizontal margin   grid styling  gap 4 vertical margin 4 space between the top and bottom of the screen. -->
+    <section id="flash" class="col-span-3 h-10 px-4 py-2 opacity-0 transition-all duration-700 ease-in-out"></section>
+    <section id="todoListsContainer" class="px-4 bg-blue-100 sm:min-h-screen rounded-md shadow">
+      <!-- todoListsContainer section has horizontal padding blue background and minimum height of the screen, it will fill the whole window. We made it rounded with a shadow in the background. -->
+      <h1 class="text-2xl semibold border-b-4 border-blue">Todo Lists</h1>
+      <!-- Header for todo lists with double xl font size that's semibold. We have a little border that's blue that's under Todo Lists and under Tasks.   -->
+
+      <form id="newTodoList" class="flex mt-4">
+        <input type="text" class="flex-1 p-3" name="name" placeholder="New List" /> 
+        <button type="submit" class="flex-none"><i class="fa fa-plus p-4 z--1 bg-green-400"></i></button>
+        <!-- Making sure the input fills the whole container -->
+        <!-- flex 1 will grow the whole container. flex-none will not.  -->
+        <!-- fa is font awesome. We are making sure that the clickable area is bigger, the icon will have a click event listener attached to it.  -->
+</form>
+      <ul id="lists" class="list-none">
+        <!-- We will create the list items via JavaScript by connecting to our API. We will look in our backend API and see what's in there, and we will use what's in the API to populate this list.  Similar with tasks.  -->
+      </ul>
+    </section>
+    <section id="tasksContainer" class="px-4 bg-blue-100 sm:min-h-screen col-span-2 rounded-md shadow">
+      <h1 class="text-2xl semibold border-b-4 border-blue">Tasks</h1>
+      <form id="newTask" class="flex mt-4">
+        <input type="text" class="block flex-1 p-3" placeholder="New Task" />
+        <button type="submit" class="block flex-none"><i class="fa fa-plus p-4 z--1 bg-green-400"></i></button>
+      </form>
+      <ul id="tasks" class="list-none">
+        <li class="my-2 px-4 bg-green-200 grid grid-cols-12">
+          <a href="#" class="py-4 col-span-10">My First Task</a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+        </li>
+      </ul>
+    </section>
+  </div>
+  <script src="js/models.js"></script>
+  <script src="js/listeners.js"></script>
+</body>
+</html>
+``` 
+```js
+`models.js`  
+class TodoList {
+  constructor(attributes) {
+    let whitelist = ["id", "name", "active"]
+    whitelist.forEach(attr => this[attr] = attributes[attr])
+  }
+  /*
+  TodoList.container() returns a reference to this DOM node:
+  <ul id="lists" class="list-none">
+  </ul>
+  */
+  static container() {
+    return this.c ||= document.querySelector('#lists')
+    //static container() returns the lists id element  
+  }
+
+  /*
+  TodoList.all() returns a promise for the collection of all todoList objects from the API.
+  It also takes those todoLists and calls render on them, generating the li DOM nodes that 
+  display them, and spreading them out into the list where they'll be appended to the DOM.
+  */
+  static all() {
+    return fetch("http://localhost:3000/todo_lists")   //fetches URL 
+      .then(res => res.json()) // Returns promise for the body of the response parsed that's in JSON formatted and it converted into a data structure. 
+      .then(todoListsJson => {
+        this.collection = todoListsJson.map(tlAttributes => new TodoList(tlAttributes))
+        let listItems = this.collection.map(list => list.render())
+        this.container().append(...listItems)
+        return this.collection
+      })
+  }
+  /*
+  render 
+  Javascript uses the document object model (DOM) to manipulate the DOM elements. Rendering refers to showing the output in the browser. 
+
+  TodoList.create(formData) will post the todoList to the database, take the successful 
+  response and use it to create a new TodoList, add it to the collection, render it and
+  insert it into the list(). If there's an error, the validation message will get added.
+  */
+  static create(formData) {   //formData is an object 
+    return fetch("http://localhost:3000/todo_lists", {
+      method: 'POST',
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(formData)
+    })
+      .then(res => {   
+        if(res.ok) {
+          return res.json()  
+        } else {
+          return res.text().then(errors => Promise.reject(errors))
+        }
+      })
+      .then(json => {
+        let todoList = new TodoList(json);
+        this.collection.push(todoList);
+        this.container().appendChild(todoList.render());
+        new FlashMessage({type: 'success', message: 'TodoList added successfully'})
+        return todoList;
+      })
+      .catch(error => {
+        new FlashMessage({type: 'error', message: error});
+      })
+  }
+  /*
+  TodoList.findById(id) will return the TodoList object that matches the id passed as an argument. We'll assume here that this.collection exists because we won't be calling this method until the DOM we've clicked on an element created by one of our TodoList instances that we created and stored in this.collection when the initial fetch has completed and promise callbacks have been executed. We're using == instead of === here so we can take advantage of type coercion 
+  (the dataset property on the target element will be a string, whereas the id of the TodoList will be an integer)
+  */
+  static findById(id) {
+    return this.collection.find(todoList => todoList.id == id)
+  }
+
+  /* 
+  This method will remove the contents of the element and replace them with the form we can use to edit the
+  todo list. We'll also change the styling of our this.element li a little so it looks better within the list.
+  <li class="my-2 bg-green-200">  
+    <form class="edit-todo-list flex mt-4" data-todo-list-id=${this.id}>
+      <input type="text" class="flex-1 p-3" name="name" value="${this.name} />
+      <button type="submit" class="flex-none"><i class="fa fa-save p-4 z--1 bg-green-400"></i></button>
+    </form>
+  </li>
+  */
+  edit() {
+    // remove the current contents of the element representing this TodoList and remove grid styles
+    [this.nameLink, this.editLink, this.deleteLink].forEach(el => el.remove())
+    this.element.classList.remove(..."grid grid-cols-12 sm:grid-cols-6 pl-4".split(" "))
+    // if we've already created the form, all we need to do is make sure the value of the name input matches the current name of the todo list
+    if(this.form) {
+      this.nameInput.value = this.name;
+    } else {
+      this.form = document.createElement('form');
+      /* adding the classes this way lets us copy what we'd have in our html here. we need to run split(" ") to get an array of class names individually, then we call ... (the spread operator) on that array so we can spread out each element as a separate argument to classList, which accepts a sequence of strings as arguments */ 
+      this.form.classList.add(..."editTodoListForm flex mt-4".split(" "));
+      this.form.dataset.todoListId = this.id;
+      // create name input 
+      this.nameInput = document.createElement('input');
+      this.nameInput.value = this.name;
+      this.nameInput.name = 'name';
+      this.nameInput.classList.add(..."flex-1 p-3".split(" "));
+      // create save button 
+      this.saveButton = document.createElement('button');
+      this.saveButton.classList.add("flex-none");
+      this.saveButton.innerHTML = `<i class="fa fa-save p-4 z--1 bg-green-400"></i>`
+
+      this.form.append(this.nameInput, this.saveButton);
+    }
+    // add the form to the empty list item.
+    this.element.append(this.form);
+    this.nameInput.focus();
+  }
+  /*
+  todoList.update(formData) will make a fetch request to update the todoList via our API, we'll take the succesful response and
+  use it to update the DOM with the new name. We'll also replace the form with the original nameLink, editLink, and deleteLink 
+  and restore the styles on the this.element li to their initial state. We'll also show a successful flash message at the top.
+  If something goes wrong, we'll hold off on removing the form and instead raise a flash error message at the top allowing the 
+  user to try again.
+  */
+  update(formData) {
+    return fetch(`http://localhost:3000/todo_lists/${this.id}`, {
+      method: 'PUT',
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(formData)
+    })
+      .then(res => {
+        if(res.ok) {
+          return res.json()
+        } else {
+          return res.text().then(errors => Promise.reject(errors))
+        }
+      })
+      .then(json => {
+        //update this object with the json response
+        Object.keys(json).forEach((key) => this[key] = json[key])
+        // remove the form
+        this.form.remove();
+        // add the nameLink edit and delete links in again.
+        this.render();
+        new FlashMessage({type: 'success', message: 'TodoList updated successfully'})
+        return todoList;
+      })
+      .catch(error => {
+        new FlashMessage({type: 'error', message: error});
+      })
+  }
+
+  delete() {
+    let proceed = confirm("Are you sure you want to delete this list?");
+    if(proceed) {
+      return fetch(`http://localhost:3000/todo_lists/${this.id}`, {
+        method: 'DELETE',
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        }
+      })
+        .then(res => {
+          if(res.ok) {
+            return res.json()
+          } else {
+            return res.text().then(errors => Promise.reject(errors))
+          }
+        })
+        .then(json => {
+          //update this object with the json response
+          let index = TodoList.collection.findIndex(list => list.id == json.id);
+          TodoList.collection.splice(index, 1);
+          this.element.remove();
+        })
+        .catch(error => {
+          new FlashMessage({type: 'error', message: error});
+        })
+    }
+  }
+
+  /*
+  <li class="my-2 px-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6">
+    <a href="#" class="py-4 col-span-10 sm:col-span-4">My List</a>
+    <a href="#" class="editList my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+    <a href="#" class="deleteList my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+  </li>
+  */
+  render() {
+    this.element ||= document.createElement('li');
+
+    this.element.classList.add(..."my-2 pl-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6".split(" "));
+    this.nameLink ||= document.createElement('a');
+    this.nameLink.classList.add(..."py-4 col-span-10 sm:col-span-4 cursor-pointer".split(" "));
+    this.nameLink.textContent = this.name;
+    // only create the edit and delete links if we don't already have them
+    if(!this.editLink) {
+      this.editLink = document.createElement('a');
+      this.editLink.classList.add(..."my-1".split(" "));
+      this.editLink.innerHTML = `<i class="fa fa-pencil-alt editTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+      this.deleteLink = document.createElement('a');
+      this.deleteLink.classList.add(..."my-1".split(" "));
+      this.deleteLink.innerHTML = `<i class="fa fa-trash-alt deleteTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+    }
+
+    this.element.append(this.nameLink, this.editLink, this.deleteLink);
+    return this.element;
+  }
+
+}
+
+class Task {
+  constructor(attributes) {
+    let whitelist = ["id", "name", "todo_list_id", "complete", "due_by"]
+    whitelist.forEach(attr => this[attr] = attributes[attr])
+  }
+
+  static container() {
+    return this.c = document.querySelector("#tasks")
+  }
+}
+
+class FlashMessage {
+  constructor({message, type}) {
+    this.error = type === "error";
+    this.message = message;
+    this.render()
+  }
+
+  container() {
+    return this.c ||= document.querySelector("#flash")
+  }
+
+  render() {
+    this.container().textContent = this.message;
+    this.toggleDisplay();
+    setTimeout(() => this.toggleDisplay(), 5000);
+  }
+
+  toggleDisplay() {
+    this.container().classList.toggle('opacity-0');
+    this.container().classList.toggle(this.error ? 'bg-red-200' : 'bg-blue-200')
+    this.displayed = !this.displayed;
+  } 
+}
+
+
+// We have two classes:  
+TodoList 
+Task  
+
+// We have to main files where our JavaScript is going to live
+models.js   
+listeners.js 
+
+`constructor(attributes)`
+// In the constructor we have a whitelisted group of attributes, we iterate over the whitelist and for each attribute we pull out the value of this.attributes object that we use to build a new todo and store it as a property of this object which is the object we're creating when we make a new to do list. 
+
+
+//This would give us a todo list object with these attributes. Example:`  
+new TodoList({id: 1, name: "My Todo List", "active": false})
+
+TodoList.container() 
+static container()
+
+// Returns a reference to the DOM node that everything is inside of.  
+
+
+static list(){
+  return this.l ||= document.querySelector("#lists")
+}
+
+// static list is used more often
+
+||=
+
+/* The reason we're doing this is we don't want to make another query to the DOM every time we call list. We do it the first time and then we capture the DOM node as a reference in the l property on the class.  When you refer to "this" in a static method we are referring to the class itself. This is true most of the time.  We can container or list on the to do list class, this.l  is same as Todolist.l  We are storing a property on the class itself called l that refers to the element with the id of #lists  
+
+ <ul id="lists" class="list-none"> 
+
+We have a reference to this element stored in the class itself. It can be referenced anywhere in the class via the list method. 
+This provides the ability to add nodes to this DOM node. 
+From the class itself we have a connection to the DOM, when we get new objects we create them or update them, we have the ability to manipulate the DOM without having to do additional queries. */ 
+
+`static container()`
+// Storing the list of tasks 
+
+
+`API Controller Notes`
+/*
+In the API Controller we return back an array of JavaScript objects. On the front end the Promise resolves. 
+We will parse the body of the response as JSON chain on another then callback to take back the property formatted data. 
+When you make a request to the API you get back a string in JSON format as the body of the response. When you call JSON on it, it will return a promise for the body parsed as a JavaScript data structure.  If we have a string with brackets we will end up with an array.  */
+
+`render`
+// render is a method that takes the object and returns the DOM node that we want to put into the page. 
+
+`TodoList.all`
+// Will return a promise for all of the todo_list objects that we get from fetching to /todo_lists  This collection will be stored locally in TodoList.collection so we can reference it after the initial call to TodoList.all() which will occur at the DOMContentLoaded event. 
+
+
+document.addEventListener('DOMContentLoaded', function(e) {
+  TodoList.all()
+})
+
+/*
+We are calling events on the document because we're relying on all events propogating up to the document. 
+We capture the target of the event and use that to determine how we should respond when that particular thing gets clicked on. 
+Rather than having separate click event listeners all of the things that we want to handle clicks on, we have a single click event listener at the document and check whatever the target of the event is, (what the CSS selector was that matched it) and then call the right method.*/ 
+
+`TodoList.all()`
+/* returns a promise for the collection of all todoList objects from the API. It also takes those todoLists and calls render on them, generating the li DOM nodes that 
+display them, and spreading them out into the list where they'll be appended to the DOM. */ 
+
+`fetch`
+/*Fetch always returns a promise for a response object Fetch very rarely returns a rejected promise. If we want to be able to do error handling we need to check in the response for an ok property. Response.ok (200-299, boolean response)*/ 
+
+static all() {
+  return fetch("http://localhost:3000/todo_lists")   //fetches URL 
+    .then(res => res.json()) // Returns promise for the body of the response parsed that's in JSON formatted and it converted into a data structure. 
+    .then(todoListsJson => {
+      this.collection = todoListsJson.map(tlAttributes => new TodoList(tlAttributes))  
+      let listItems = this.collection.map(list => list.render())   
+      this.container().append(...listItems)  //Spreading it so we can get it as a list of separate arguments q
+      return this.collection
+    })
+  }
+
+  static create(formData) {   //formData is an object 
+    return fetch("http://localhost:3000/todo_lists", {
+      method: 'POST',
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(formData)
+
+  
+    })
+      .then(res => {   
+        if(res.ok) {
+          return res.json()  
+        } else {
+          return res.text().then(errors => Promise.reject(errors))
+        }
+
+      })
+      .then(json => {
+        let todoList = new TodoList(json);
+        this.collection.push(todoList);
+        this.container().appendChild(todoList.render());
+        new FlashMessage({type: 'success', message: 'TodoList added successfully'})
+        return todoList;
+
+
+      })
+      .catch(error => {
+        new FlashMessage({type: 'error', message: error});
+      })
+  }
+
+
+`JSON.stringify()`
+// The JSON.stringify() method converts a JavaScript object or value to a JSON string, 
+// optionally replacing values if a replacer function is specified or optionally including only the specified properties if a replacer array is specified.
+
+`Promise.reject()`
+// The Promise.reject() method returns a Promise object that is rejected with a given reason.
+
+`error`
+// The error message comes from the API  
+
+`res.text`
+// The reason we use res.text and not res.json is because res.text also returns a promise. 
+// No matter what the format originally was, we can see the error in plain text. 
+
+`render`
+// Javascript uses the document object model (DOM) to manipulate the DOM elements. Rendering refers to showing the output in the browser.
+// We will also use render to return the DOM element. The list item tag with the data from the API in it.  
+```
+
+```rb
+
+# Serializer
+# rails g serializer TodoList id name
+
+class TodoListSerializer
+  include FastJsonapi::ObjectSerializer 
+  attributes :id, :name
+end
+
+class TodoListsController < ApplicationController
+  before_action :set_todo_list, only: [:show, :update, :destroy]
+
+
+  def index     # GET /todo_lists 
+    @todo_lists = current_user.todo_lists  
+    render json: TodoListSerializer.new(@todo_lists).serializable_hash[:data].map{|hash| hash[:attributes]}   #This is how it's used. 
+# Before the serializer we had an array of objects and after we have a data property pointing to an array of objects. Each object has id, type and attribute. We need to things in attributes. 
+# serializable_hash 
+# returns a serialized hash of your object.
+# We use the brackets method [] to access the key in a hash. 
+  end
+```
+
+`TodoListArray`
+TodoListArray is an Array of objects. Each one of the objects can be used to make a new to do list instance of the class that we have. 
+We want to take the array of objects and make it an array of instances for this we use the map method. 
+
+todoListArray.map(attrs => new TodoList(attrs)) 
+
+
+
+
+`Arrow Functions vs. Regular Functions`
+The "this" Arrow Functions have the same context. They have the same context as when they are defined. 
+Regular Functions do not retain the same context. 
+
+Functions like .filter .map .ForEach are regular keyword functions defined on the array prototype which means any instance of array object can receive those methods and within the method function call this will refer to the particular array that you called the function on. 
+
+`this.collection`
+We store the collection we have created in this.collection 
+The collection is the todo list we got from the api initially
+collection is a property of the class 
+
+
+```js
+render() {
+    this.element ||= document.createElement('li');  
+
+    this.element.classList.add(..."my-2 pl-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6".split(" "));
+    this.nameLink ||= document.createElement('a');
+    this.nameLink.classList.add(..."py-4 col-span-10 sm:col-span-4 cursor-pointer".split(" "));
+    this.nameLink.textContent = this.name;
+    // only create the edit and delete links if we don't already have them
+    if(!this.editLink) {
+      this.editLink = document.createElement('a');
+      this.editLink.classList.add(..."my-1".split(" "));
+      this.editLink.innerHTML = `<i class="fa fa-pencil-alt editTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+      this.deleteLink = document.createElement('a');
+      this.deleteLink.classList.add(..."my-1".split(" "));
+      this.deleteLink.innerHTML = `<i class="fa fa-trash-alt deleteTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+    }
+
+    this.element.append(this.nameLink, this.editLink, this.deleteLink); 
+    // We're appending multiple nodes, a collection.  It's important that we do it this way because we have separate references  
+    return this.element;
+    //returning the element   
+  }
+``` 
+`Element.classList`
+The Element.classList is a read-only property that returns a live DOMTokenList collection of the class attributes of the element. 
+This can then be used to manipulate the class list. Also, using classList is a convenient alternative to accessing an element's list of classes as a 
+space-delimited string via element.className.
+
+`Syntax for Element.classList`
+const elementClasses = elementNodeReference.classList;
+
+`Returns`
+A DOMTokenList representing the contents of the element's class attribute. 
+If the class attribute is not set or empty, it returns an empty DOMTokenList, i.e. a DOMTokenList with the length property equal to 0.
+The DOMTokenList itself is read-only, although you can modify it using the add() and remove() methods.
+
+`this.nameLink`  ?? 
+This is a property name we assigned to the DOM node that will display the name as a link  
+
+`textContent`
+textContent gets the content of all elements, including script and style elements. 
+returns every element in the node. 
+
+`innerText`
+innerText only shows “human-readable” elements. 
+innerText is aware of styling and won't return the text of “hidden” elements.
+
+`innerHTML`
+innerHTML property returns the text, including all spacing and innerelement tags. 
+Do not use innerHTML= when it involves user input because it opens up a vulnerability with scripts 
+
+`Node.appendChild()`
+The Node.appendChild() method adds a node to the end of the list of children of a specified parent node. 
+If the given child is a reference to an existing node in the document, appendChild() moves it from its current position to the new position 
+(there is no requirement to remove the node from its parent node before appending it to some other node).
+
+`ParentNode.append()`
+The ParentNode.append() method inserts a set of Node objects or DOMString objects after the last child of the ParentNode. 
+DOMString objects are inserted as equivalent Text nodes.
+
+`Differences from Node.appendChild():` 
+
+`ParentNode.append()` 
+Allows you to also append DOMString objects, whereas Node.appendChild() only accepts Node objects.
+Has no return value, whereas Node.appendChild() returns the appended Node object.
+Can append several nodes and strings, whereas Node.appendChild() can only append one node
+
+`Spread Operator (...)`
+The spread operator is a useful and quick syntax for adding items to arrays, combining arrays or objects, and spreading an array out into a function’s arguments.
+this.editLink.classList.add(..."my-1".split(" "))
+
+`split()`
+The split() method is used to split a string into an array of substrings, and returns the new array.
+If an empty string ("") is used as the separator, the string is split between each character.
+The split() method does not change the original string.
+
+`flat()`
+THe flat() method creates a new array with all sub-array elements concetenated into it recursively up to the specific depth
+```
+```
+
+```js 
+
+static all() {
+  return fetch("http://localhost:3000/todo_lists")   //fetches URL 
+    .then(res => res.json()) // Returns promise for the body of the response parsed that's in JSON formatted and it converted into a data structure. 
+    .then(todoListsJson => {
+      this.collection = todoListsJson.map(tlAttributes => new TodoList(tlAttributes))  
+      let listItems = this.collection.map(list => list.render())   
+      this.container().append(...listItems)  
+      //We have an array of 5 listItem elements, by spreading it we are turning it into 5 separate elements which are separated by commas. 
+      //Instead of it being one array we have 5 separate elements. 
+      //Spreading it so we can get it as a list of separate arguments. 
+      return this.collection
+      //Returning a promise for the collection 
+    })
+  }
+
+``` 
+
+
+In the render() having references to these objects and not having to keep doing queries is part of the strenght. 
+Our JavaScript Model object knows about the data stored in the DB but it also knows about how that data is being displayed. 
+We are storing references to the DOM Node that's displaying the information from the DB. 
+If we need to manipulate the DOM node, we don't have to do a query to do it because we have a references that has access to it. 
+
+The class takes responsibility for updating the database if necessary and then using the Database API response to update the DOM accordingly. 
+
+`The idea is that if you need access to something you have 2 main places you store it` 
+Store it at the class level as a property of the class if it's something that needs to be accessed accross different instances 
+Store it at the instance level, via this.something   
+
+`e.target.querySelectorAll("input")`
+Provides a node list with all of your inputs 
+If each of the inputs has a name, we could use the name to build form data
+It's sometimes simpler to target an individual one 
+
+The target of a submit event will always be the form that you submitted 
+Cutting out repetition by naming your inputs. 
+Make sure your input names match the methods and attributes you want to set on the model object you're creating. Which are usually columns in the DB where you want to insert the values into. ?? 
+
+```js 
+
+document.addEventListener("submit", function(e){
+let target = e.target
+if(target.matches("#newTodoList")){
+  e.preventDefault()
+let formData = {}
+target.querySelectorAll("input").forEach(function(input){
+  formData[input.name] = input.value;
+})
+}
+})
+```
+`fetch`
+In the chrome console we saw that the request has already been set, the response has already been sent too, it's an illustration of asynchronous code and the way chrome or a browser is interacting with it. 
+fetch returns a promise, the promise api allows us to attach asynchronous callbacks. The browser won't process all of it or resolve until the callstack is clear. If you want to see the result of a fetch request in  a debugger the debugger has to be in the callback. This way it won't stop until all the functions that are running complete. 
+
+`debugger`
+When we hit a debugger chrome is pausing our code. The callstack still has the function in it and it hasn't returned yet. It's preventing the promise from resolving. The debugger is stopping the synchronous code from finishing.  
+
+`to_sentence(options = {}) public`
+Converts the array to a comma-separated sentence where the last element is joined by the connector word.
+['one', 'two'].to_sentence          # => "one and two"
+['one', 'two', 'three'].to_sentence # => "one, two, and three"
+
+`this.container is not a function`
+Although it says it's not a function we don't know what it is 
+If you go into a debugger and type it in without () it will tell you what it is 
+The reason we got the message is because we have defined container as a static method. A static method gets called directly on the class. In our example it's FlashMessage. 
+
+`Defining Methods Inside Of A Class`
+Every time you define a method inside of a class it's a function keyword function. 
+It's context is set at call time, not at definition time.  
+This was a problem with toggleMessage function. 
+
+`setTimeout`
+The first time "this" is called it's being called on the FlashMessage class. 
+The second time "this" is called within setTimeout, it's being called on the Window. 
+setTimeout is a method in a window object. The callback function is invoked when the Window object is in scope.  
+this.toggleMessage inside of setTimeout 
+
+`bind`
+This is used to state that we want the context not to change
+We could also use an arrow function to achieve a similar outcome.  
+
+`dataset`
+The dataset read-only property of the HTMLorForeignElement interface provides read/write access to custom data attributes on elements. 
+It exposes a map of strings (DOMStringMap) with an entry for each data attribute. 
+The dataset property itself can read, but not directly written. Instead, all write must be to the individual properties within the dataset, 
+which in turn represent the data attributes. 
+An HTML data attribute and it's corresponding DOM dataset.property modify their shared name according to where they are read or written. 
+
+`example`
+data-abc-def attribute corresponds to dataset.abcDef.
+
+
+When we set the dataset property for todoListId to the id of that particular todoList instance the object in
+what we're doing is we're adding that data attribute to the DOM node so that when we put it back in the DOM and look back at the elements tab the element we select actually has this attribute "data-todo-list-id" and it's set equal to the id of the object associated with that element's DOM node. ?? 
+
+setter and getter ?? 
+
+
+
+
+/*
+  Event.container() returns a reference to this DOM node:
+  <section id="calendarsContainer" class="px-4 bg-blue-100 min-h-screen rounded-md shadow">
+    <h1 class="text-2xl semibold border-b-4 border-blue">Todo Lists</h1>
+    <ul id="lists" class="list-none">
+    </ul>
+  </section>
+    
+  Calendar.list() returns a reference to this DOM node:
+  <ul id="lists" class="list-none">
+  </ul>
+
+
+  Calendar.all() returns a promise for the collection of all calendar objects from the API.
+  It also takes those calendars and calls render on them, generating the li DOM nodes that 
+  display them, and spreading them out into the list where they'll be appended to the DOM.
+
+  
+  Calendar.create(formData) will make a fetch request to create a new Todo List in our database.
+  It will use a successful response to create a new Todo List client side and store it in this.collection.
+  It will also call render() on it to create the DOM element we'll use to represent it in our web page.
+  Finally it will add that DOM node to Calendar.container().
+  It will return a promise for the Calendar object that was created.
+  
+
+  Calendar.render() will create an li element and assign it to this.element. It will then fill the element with contents 
+  looking like the below html:
+  <li class="my-2 px-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6">
+    <a href="#" class="py-4 col-span-10 sm:col-span-4">My List</a>
+    <a href="#" class="my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+    <a href="#" class="my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+  </li>
+
+https://developer.mozilla.org/en-US/docs/Web/API/Response  
+https://developer.mozilla.org/en-US/docs/Web/API/Node/textContent
+https://developer.mozilla.org/en-US/docs/Web/API/Element/classList 
+https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/add 
+
+    /*  ?? 
+    <div
+    */
+
+
+
+
+
+
+
+
+
+
+# Rails JS Todo List App Backend
+
+
+<!-- Backend   API Models Database Controllers Routes Serializers that return JSON-->
+<!-- Front End   HTML CSS JAVASCRIPT-->
+
+
+
+
+
+
+
+For the beginning of this build, we followed along with the [Rails Devise JWT Tutorial](https://github.com/dakotalmartinez/rails-devise-jwt-tutorial)
+
+
+
+```
+/*
+t.string :name 
+t.references :user
+*/
+Calendar 
+  belongs_to :user
+  has_many :events 
+
+/*
+t.string :name 
+t.text :notes
+t.boolean :complete 
+t.references :user
+t.references :todo_list
+*/
+Event
+  belongs_to :user
+  belongs_to :calendar 
+```
+
+```
+rails g scaffold Calendar name user:references   
+```
+
+```
+rails g scaffold Event name start_time:datetime end_time:datetime notes:text completed:boolean user:references todo_list:references
+```
+
+
+
+
+# Rails Devise JWT Tutorial
+
+Thanks to [this tutorial on Tech Compose](https://www.techcompose.com/rails-6-api-fast_jsonapi-gem-with-devise-and-jwt-authentication/) and the [devise](https://github.com/heartcombo/devise) and [devise-jwt](https://github.com/waiting-for-dev/devise-jwt) gems. Also this [blog post on token recovation strategies](http://waiting-for-dev.github.io/blog/2017/01/24/jwt_revocation_strategies/) was helpful to me.
+
+This article is all about authentication in rails 6 using devise and devise-jwt with fast_jsonapi response.
+
+Fast_jsonapi
+A lightning fast JSON:API serializer for Ruby Objects. It is better in performance compared to Active Model Serializer.
+
+## Devise and JWT
+Devise-jwt is a devise extension which uses JSON Web Tokens(JWT) for user authentication. With JSON Web Tokens (JWT), rather than using a cookie, a token is added to the request headers themselves (rather than stored/retrieved as a cookie). This isn’t performed automatically by the browser (as with cookies), but typically will be handled by a front-end framework as part of an AJAX call.
+
+## Create a new Rails API app
+In this step, We need to create a rails application with api_only mode with optional database params(If you want to change).
+
+```
+$ rails new rails-jwt-tutorial -–api -–database=postgresql -T
+```
+Here, I have created a rails 6 application using postgresql (Default SQLite).
+(Note: If you are using postgresql then you have to setup database.yml)
+
+## Configure Rack Middleware
+As this is an API Only application, we have to handle ajax requests. So for that, we have to Rack Middleware for handling Cross-Origin Resource Sharing (CORS)
+
+To do that, Just uncomment the 
+```
+gem 'rack-cors'
+``` 
+line from your generated Gemfile. And uncomment the contents of `config/initialzers/cors.rb` the following lines to application.rb, adding an expose option in the process:
+
+```rb
+# config/initializers/cors.rb
+Rails.application.config.middleware.insert_before 0, Rack::Cors do
+  allow do
+    origins '*'
+    resource(
+     '*',
+     headers: :any,
+     expose: ["Authorization"],
+     methods: [:get, :patch, :put, :delete, :post, :options, :show]
+    )
+  end
+end
+```
+
+Here, we can see that there should be an "Authorization" header exposed which will be used to dispatch and receive JWT tokens in Auth headers.
+
+## Add the needed Gems
+
+Here, we are going to add gem like ‘devise’ and ‘devise-jwt’ for authentication and the dispatch and revocation of JWT tokens and ‘fast_jsonapi’ gem for json response.
+```rb
+gem 'devise'
+gem 'devise-jwt'
+gem 'fast_jsonapi'
+```
+
+Then, do 
+```bash
+bundle install
+```
+
+## Configure devise
+By running the following command to run a generator
+```
+$ rails generate devise:install
+```
+It is important to set our navigational formats to empty in the generated devise.rb by uncommenting and modifying the following line since it’s an api only app.
+```
+config.navigational_formats = []
+```
+
+Also, add the following line to config/environments/development.rb
+```
+config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }
+```
+
+## Create User model
+You can create a devise model to represent a user. It can be named as anything. So, I’m gonna be going ahead with User. Run the following command to create User model.
+```
+$ rails generate devise User
+```
+Then run migrations using,
+
+```
+$ rails db:create
+$ rails db:migrate
+```
+## Create devise controllers and routes
+We need to create two controllers (sessions, registrations) to handle sign ups and sign ins. 
+```
+rails g devise:controllers users -c sessions registrations
+```
+specify that they will be responding to JSON requests. The files will look like this:
+```rb
+class Users::SessionsController < Devise::SessionsController
+  respond_to :json
+end
+```
+```rb
+class Users::RegistrationsController < Devise::RegistrationsController
+  respond_to :json
+end
+```
+Then, add the routes aliases to override default routes provided by devise in the routes.rb
+
+```rb
+Rails.application.routes.draw do
+  devise_for :users, path: '', path_names: {
+    sign_in: 'login',
+    sign_out: 'logout',
+    registration: 'signup'
+  },
+  controllers: {
+    sessions: 'users/sessions',
+    registrations: 'users/registrations'
+  }
+end
+```
+
+## Configure devise-jwt
+
+Add the following lines to devise.rb
+```rb
+config.jwt do |jwt|
+    jwt.secret = Rails.application.credentials.fetch(:secret_key_base)
+    jwt.dispatch_requests = [
+      ['POST', %r{^/login$}]
+    ]
+    jwt.revocation_requests = [
+      ['DELETE', %r{^/logout$}]
+    ]
+    jwt.expiration_time = 30.minutes.to_i
+end
+```
+
+Here, we are just specifying that on every post request to login call, append JWT token to Authorization header as “Bearer” + token when there’s a successful response sent back and on a delete call to logout endpoint, the token should be revoked.
+
+The `jwt.expiration_time` sets the expiration time for the generated token. In this example, it’s 30 minutes.
+
+## Set up a revocation strategy
+Revocation of tokens is an important security concern. The `devise-jwt` gme comes with three revocation strategies out of the box. You can read more about them in this [blog post on token recovation strategies](http://waiting-for-dev.github.io/blog/2017/01/24/jwt_revocation_strategies/). 
+
+For now, we'll be going with the one they recommended with is to store a single valid user attached token with the user record in the users table.
+
+Here, the model class acts itself as the revocation strategy. It needs a new string column with name `jti` to be added to the user. `jti` stands for JWT ID, and it is a standard claim meant to uniquely identify a token.
+
+It works like the following:
+
+- When a token is dispatched for a user, the `jti` claim is taken from the `jti` column in the model (which has been initialized when the record has been created).
+- At every authenticated action, the incoming token `jti` claim is matched against the `jti` column for that user. The authentication only succeeds if they are the same.
+- When the user requests to sign out its `jti` column changes, so that provided token won't be valid anymore.
+
+In order to use it, you need to add the `jti` column to the user model. So, you have to set something like the following in a migration:
+
+```ruby
+def change
+  add_column :users, :jti, :string, null: false
+  add_index :users, :jti, unique: true
+  # If you already have user records, you will need to initialize its `jti` column before setting it to not nullable. Your migration will look this way:
+  # add_column :users, :jti, :string
+  # User.all.each { |user| user.update_column(:jti, SecureRandom.uuid) }
+  # change_column_null :users, :jti, false
+  # add_index :users, :jti, unique: true
+end
+```
+
+To add this, we can run
+```
+rails g migration addJtiToUsers jti:string:index:unique
+```
+And then make sure to add `null: false` to the `add_column` line and `unique: true` to the `add_index` line
+
+**Important:** You are encouraged to set a unique index in the `jti` column. This way we can be sure at the database level that there aren't two valid tokens with same `jti` at the same time.
+
+Then, you have to add the strategy to the model class and configure it accordingly:
+
+```ruby
+class User < ApplicationRecord
+  include Devise::JWT::RevocationStrategies::JTIMatcher
+
+  devise :database_authenticatable,
+         :jwt_authenticatable, jwt_revocation_strategy: self
+end
+```
+
+Be aware that this strategy makes uses of `jwt_payload` method in the user model, so if you need to use it don't forget to call `super`:
+
+```ruby
+def jwt_payload
+  super.merge('foo' => 'bar')
+end
+```
+In our case, we won't be needing to interact with the jwt_payload directly, so we can move on for now. Next, we'll run migrations using 
+```bash
+rails db:migrate
+```
+
+## Add respond_with using fast_jsonapi method
+As we already added the `fast_jsonapi` gem, we can generate a serializer to configure the json format we'll want to send to our front end API.
+
+```
+$ rails generate serializer user id email created_at
+```
+It will create a serializer with a predefined structure. Now, we have to add the attributes we want to include as a user response. So, we'll add the user's id, email and created_at. So the final version of user_serializer.rb looks like this:
+```rb
+class UserSerializer
+  include FastJsonapi::ObjectSerializer
+  attributes :id, :email, :created_at
+end
+```
+
+We can access serializer data for single record by,
+```rb
+UserSerializer.new(resource).serializable_hash[:data][:attributes]
+And multiple records by,
+UserSerializer.new(resource).serializable_hash[:data].map{|data| data[:attributes]}
+```
+
+Now, we have to tell devise to communicate through JSON by adding these methods in the `RegistrationsController` and `SessionsController`
+
+```rb
+class Users::RegistrationsController < Devise::RegistrationsController
+  respond_to :json
+  private
+
+  def respond_with(resource, _opts = {})
+    if resource.persisted?
+      render json: {
+        status: {code: 200, message: 'Logged in sucessfully.'},
+        data: UserSerializer.new(resource).serializable_hash[:data][:attributes]
+      }
+    else
+      render json: {
+        status: {message: "User couldn't be created successfully. #{resource.errors.full_messages.to_sentence}"}
+      }, status: :unprocessable_entity
+    end
+  end
+end
+
+class Users::SessionsController < Devise::SessionsController
+  respond_to :json
+  private
+
+  def respond_with(resource, _opts = {})
+    render json: {
+    status: {code: 200, message: 'Logged in successfully.'},
+    data: UserSerializer.new(resource).serializable_hash[:data][:attributes]
+    }
+  end
+  
+  def respond_to_on_destroy
+    if current_user 
+      render json: {
+        status: 200,
+        message: "logged out successfully"
+      }, status: :ok
+    else
+      render json: { 
+        status: 401,
+        message: "Couldn't find an active session."
+      }, status: :unauthorized
+    end
+  end
+end
+```
+  
+Remember, you can use the attribute method in a serializer to add a property to the JSON response based on an expression you return from a block that has access to the object you're serializing. For example, you can modify the column name and data format by overwrite attribute:
+```rb
+attribute :created_date do |user|
+       user && user.created_at.strftime('%d/%m/%Y')
+end
+```
+Here, we're adding a created_date attribute that will reformat the user's created_at value in the one we specify.
+
+Here you can get [detailed information on fast_jsonapi](https://github.com/Netflix/fast_jsonapi).
+
+## Finally, it’s done
+Now you can add the following line in any controller to authenticate your user.
+```
+before_action :authenticate_user!
+```
+To test it, you can try this in the browser console
+
+```js
+fetch('http://localhost:3000/signup', {  
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ "user": {
+      "email" : "test@test.com",
+      "password" : "password"
+    }})
+})
+  .then(res => {
+    if(res.ok) {
+      console.log(res.headers.get('Authorization'))
+      localStorage.setItem('token', res.headers.get('Authorization'))
+      return res.json()
+    } else {
+      throw new Error(res);
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+```
+If everything worked correctly, we should see the token logged to the console as well as the server response looking something like this:
+
+![Fetch Authentication Check for Devise JWT backend](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607455998/fetch-auth-with-jwt-check_erkubi.jpg)
+
+After you've got the token stored locally, you can try it out to make a request that requires authentication. To do this, we'd need to actually have a route like this that requires users to be logged in to get a response.
+
+```
+rails g controller private test
+```
+
+```rb
+class PrivateController < ApplicationController
+  before_action :authenticate_user!
+  def test
+    render json: { 
+      message: "This is a private message for #{current_user.email} you should only see if you've got a correct token"
+    }
+  end
+end
+```
+
+And now, to test this out in the browser, you can run this:
+```js
+fetch('http://localhost:3000/private/test', {  
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+  .then(res => {
+    if(res.ok) {
+      return res.json()
+    } else if (res.status == "401") {
+      throw new Error("Unauthorized Request. Must be signed in.");
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+```
+Because we're not including the authorization token in the header, the response status should be unauthorized (401) and the error will be thrown, resulting in a rejected promise. See below:
+![Result of unauthenticated request to private route](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607479933/Screen_Shot_2020-12-08_at_11.42.49_AM_evbgtn.png)
+
+As expected, without our JWT, the request is unauthorized because we have the `before_action :authenticate_user!` in our controller. So, now we can add the token in the header and see the difference
+
+```js
+fetch('http://localhost:3000/private/test', {  
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': localStorage.getItem('token')
+  }
+})
+  .then(res => {
+    if(res.ok) {
+      return res.json()
+    } else if (res.status == "401") {
+      throw new Error("Unauthorized Request. Must be signed in.");
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+```
+
+![Authenticated fetch request in browser](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607479933/Screen_Shot_2020-12-08_at_11.59.34_AM_rqremc.png)
+
+Notice that this time we're actually able to access the private message and it includes information about the `current_user` which is now accessible on the server side because the JWT in the authorization header has correctly identified us to the server on the subsequent request.
+
+## Handling logout
+
+Finally, we want to be able to log a user out of our application. Our tokens only last for 30 minutes, so we'll esentially be logged out after 30 minutes of no activity. That said, we'd like to allow users to end their sessions a bit early if they so choose. To test this out. We'll want to sign in first, store the token, make a request to /private/test and make sure it works then logout and make another request to /private/test and it shouldn't work.
+
+```js
+fetch('http://localhost:3000/login', {  
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ "user": {
+      "email" : "test@test.com",
+      "password" : "password"
+    }})
+})
+  .then(res => {
+    if(res.ok) {
+      console.log(res.headers.get('Authorization'))
+      localStorage.setItem('token', res.headers.get('Authorization'))
+      return res.json()
+    } else {
+      return res.text().then(text => Promise.reject(text));
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+```
+
+![Browser Result on successful login](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607495088/fetch-auth-login-successful_lexjgm.jpg)
+
+Notice here we see the token logged again.
+
+Next we'll want to make the request to logout. At this point, we won't actually remove the token from localStorage, just to confirm that the same token no longer allows us to make authenticated requests. When you actually use this code, you'll want to remove the token from localStorage upon successful logout. We don't need to store a token if it's no longer valid and having a token in localStorage could be used as an indicator of an active session in conditional logic if we remove the token after a session expires.
+
+*** Note, you'll need to make sure you include the JWT in the authorization headers of this logout request, otherwise Devise won't know which user's token to revoke.  
+
+```js
+fetch('http://localhost:3000/logout', {  
+  method: 'delete',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': localStorage.getItem('token')
+  }
+})
+  .then(res => {
+    if(res.ok) {
+      return res.json()
+    } else {
+      return res.json().then(json => Promise.reject(json))
+    }
+  })
+  .then(json => {
+    console.dir(json)
+  })
+  .catch(err => console.error(err))
+```
+
+![Successful Async Logout request](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607496671/Screen_Shot_2020-12-08_at_9.35.51_PM_f0r5mc.png)
+
+Now if we make the the request for private/test again using the same token (still in localStorage)
+using the following code:
+```js
+fetch('http://localhost:3000/private/test', {  
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': localStorage.getItem('token')
+  }
+})
+  .then(res => {
+    if(res.ok) {
+      return res.json()
+    } else if (res.status == "401") {
+      return res.text().then(text => Promise.reject(text))
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+```
+
+We'll get an error when we do so letting us know we have a revoked token. 
+![Request for private route using revoked token](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607496716/Screen_Shot_2020-12-08_at_10.13.54_PM_ziteww.png)
+
+We actually had to use res.text() here instead of res.json() to read this response properly. 
+Let's see what happens if we use the same code to request the private route, but use an expired token.
+
+![Request to private route using expired token](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607538705/Screen_Shot_2020-12-09_at_10.31.26_AM_qqh2a9.png)
+
+Finally, let's try out the request with the header present but no token. To do this, let's remove the token from localStorage and then run the fetch again.
+
+```js
+localStorage.removeItem('token')
+```
+
+![Request Sent without any active token](https://res.cloudinary.com/dnocv6uwb/image/upload/v1607538866/Screen_Shot_2020-12-09_at_10.34.01_AM_il2xf0.png)
+
+You can see here how your API will respond to requests made to protected routes in differing states of authorization. 
+
+Header | Status | Content
+------- | ------- | -------
+Authorization Header with valid JWT | 200 | successful response containing JSON
+Authorization Header with expired JWT | 401 | text response indicating `Signature has expired`
+Authorization Header with no JWT | 401 | text response indicating `You need to sign in or sign up before continuing.`
+
+If we want to have a separate error messages for our users if their session is expired, then we can leave things as they are. If we just wanted our users to see the `You need to sign in or signup` message, we could also store the time that a token was created in localStorage. We can introduce a function to retrieve the token and only return the token if it was created less than 30 minutes ago (or whatever your jwt expiration time is set to in the `config/initializers/devise.rb` initializer).
+
+
+```js
+function setToken(token) {
+  localStorage.setItem('token', token);
+  localStorage.setItem('lastLoginTime', new Date(Date.now()).getTime())
+}
+function getToken() {
+  let now = new Date(Date.now()).getTime();
+  let thirtyMinutes = 1000 * 60 * 30;
+  let timeSinceLastLogin = now - localStorage.getItem('lastLoginTime');
+  if(timeSinceLastLogin < thirtyMinutes) {
+    return localStorage.getItem('token');
+  }
+}
+
+fetch('http://localhost:3000/login', {  
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ "user": {
+      "email" : "test@test.com",
+      "password" : "password"
+    }})
+})
+  .then(res => {
+    if(res.ok) {
+      setToken(res.headers.get('Authorization'))
+      return res.json()
+    } else {
+      return res.text().then(text => Promise.reject(text));
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+// Then wait 30 minutes and do this:
+
+fetch('http://localhost:3000/private/test', {  
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': getToken()
+  }
+})
+  .then(res => {
+    if(res.ok) {
+      return res.json()
+    } else if (res.status == "401") {
+      return res.text().then(text => Promise.reject(text))
+    }
+  })
+  .then(json => console.dir(json))
+  .catch(err => console.error(err))
+
+
+```
+
+## Making a modal 
+
+First step is to copy the modal html into our document:
+
+```html
+<!--Modal-->
+<div class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center">
+  <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-50"></div>
+  
+  <div class="modal-container bg-white w-11/12 md:max-w-md mx-auto rounded shadow-lg z-50 overflow-y-auto">
+    
+    <div class="modal-close absolute top-0 right-0 cursor-pointer flex flex-col items-center mt-4 mr-4 text-white text-sm z-50">
+      <svg class="fill-current text-white" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+        <path d="M14.53 4.53l-1.06-1.06L9 7.94 4.53 3.47 3.47 4.53 7.94 9l-4.47 4.47 1.06 1.06L9 10.06l4.47 4.47 1.06-1.06L10.06 9z"></path>
+      </svg>
+      <span class="text-sm">(Esc)</span>
+    </div>
+
+    <!-- Add margin if you want to see some of the overlay behind the modal-->
+    <div class="modal-content py-4 text-left px-6">
+      <!--Title-->
+      <div class="flex justify-between items-center pb-3">
+        <p class="text-2xl font-bold">Simple Modal!</p>
+        <div class="modal-close cursor-pointer z-50">
+          <svg class="fill-current text-black" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+            <path d="M14.53 4.53l-1.06-1.06L9 7.94 4.53 3.47 3.47 4.53 7.94 9l-4.47 4.47 1.06 1.06L9 10.06l4.47 4.47 1.06-1.06L10.06 9z"></path>
+          </svg>
+        </div>
+      </div>
+
+      <!--Body-->
+      <p>Modal content can go here</p>
+      <p>...</p>
+      <p>...</p>
+      <p>...</p>
+      <p>...</p>
+
+      <!--Footer-->
+      <div class="flex justify-end pt-2">
+        <button class="px-4 bg-transparent p-3 rounded-lg text-indigo-500 hover:bg-gray-100 hover:text-indigo-400 mr-2">Action</button>
+        <button class="modal-close px-4 bg-indigo-500 p-3 rounded-lg text-white hover:bg-indigo-400">Close</button>
+      </div>
+      
+    </div>
+  </div>
+</div>
+```
+
+We next want to make a class that manages the Modal
+It should be able to populate the modal with a title and content. 
+It should be able to manage toggling the modal (making it visible or hidden)
+
+To accomplish these tasks, we'll need to create references to the containers in which 
+the title and content will reside. 
+To manage toggling: We'll also need references to the modal element and the body element.
+
+First, we'll add an #id to the title paragraph in the modal, so we can target it with js.
+```html
+<p id="modal-title" class="text-2xl font-bold">Simple Modal!</p>
+```
+Next, we'll add an element to the modal where we can put the contents:
+```html
+<!--Body-->
+<div id="modal-content">
+  <p>Modal content can go here</p>
+  <p>...</p>
+  <p>...</p>
+  <p>...</p>
+  <p>...</p>
+</div>
+```
+Now, let's create the class. Because we're only going to manage a single modal on the page, we'll use 
+static methods to manage the behavior. (We don't need instances only one, so class methods are sufficient)
+
+```js
+class Modal {
+  static init() {
+    this.body ||= document.body;
+    this.modal ||= document.querySelector('.modal');
+  }
+}
+```
+Now that we have references to the body and modal elements, we can add the toggle method which will display 
+the modal when called.
+
+```js
+class Modal {
+  static init() {
+    this.body ||= document.body;
+    this.modal ||= document.querySelector('.modal');
+  }
+
+  static toggle() {
+    this.modal.classList.toggle('opacity-0');
+    this.modal.classList.toggle('pointer-events-none');
+    this.body.classList.toggle('modal-active');
+  }
+}
+```
+
+If we run `Modal.init()` and then `Modal.toggle()` in our browser console, we should see the modal appear.
+
+In order to get this working with our own content, we'll need a method called `populate`. This method will 
+accept an object as an argument with properties for title and content. Those property values will be 
+inserted into the modal at the two elements we added ids to earlier. We can also store references to these 
+within init(). 
+
+```js
+class Modal {
+  static init() {
+    this.body ||= document.body;
+    this.modal ||= document.querySelector('.modal');
+    this.title ||= document.querySelector('#modal-title');
+    this.content ||= document.querySelector('#modal-content');
+  }
+
+  static populate({title, content}) {
+    this.title.innerText = title;
+    this.content.innerHTML = ""; 
+    this.content.append(content);
+  }
+
+  static toggle() {
+    this.modal.classList.toggle('opacity-0');
+    this.modal.classList.toggle('pointer-events-none');
+    this.body.classList.toggle('modal-active');
+  }
+}
+```
+
+
+To try this in the browser, we'd need to do the following:
+```js
+Modal.init() 
+Modal.populate({title: "hello", content: "world"});
+Modal.toggle();
+```
+
+This allows us to display the modal via our javascript and populate it with the contents of our choosing.
+
+We want to trigger the modal to open upon clicking the task edit icon.
+
+First, let's call `Modal.init()` when the page loads, so we're ready to populate and toggle the modal when it's time:
+
+```js
+document.addEventListener('DOMContentLoaded', function(e) {
+  TodoList.all();
+  Modal.init();
+})
+```
+
+We also need to make sure that the edit task icon has a class we can use to target the click event. We also need
+access to the task id that we're trying to edit, so we'll add that as a data attribute in `task.render()`
+
+```js
+this.editLink.innerHTML = `<i class="editTask p-4 fa fa-pencil-alt" data-task-id="${this.id}"></i>`;
+```
+Now, we'll capture that click event and hopefully land in the debugger with access to the task.
+```js
+else if(target.matches(".editTask")) {
+  let task = Task.findById(target.dataset.taskId);
+  debugger
+  
+}
+```
+
+It works properly, so we can add in the modal code:
+
+```js
+else if(target.matches(".editTask")) {
+  let task = Task.findById(target.dataset.taskId);
+  Modal.populate({title: "Edit Task", content: "Task edit form"})
+  Modal.toggle()
+  
+}
+```
+
+So this will display the edit form in the modal. However at the moment we're just displaying a string not an actual form.
+So, we'll need to create a method in the `Task` class that returns the form element we want to add inside of the modal.
+
+We'll call this method, `edit()`
+
+```js
+/*
+task.edit() => returns a form that will allow updating a task. 
+*/
+edit() {
+  this.editForm ||= document.createElement('form');
+  this.editForm.classList.set("taskEditForm mb-2");
+  this.editForm.dataset.taskId = this.id;
+  this.editForm.innerHTML = `
+    <fieldset class="my-2">
+      <label for="name" class="block w-full uppercase">Name</label>
+      <input  
+        type="text" 
+        name="name" 
+        id="name"
+        class="w-full border-2 rounded p-2 focus:outline-none focus:ring focus:border-blue-300" 
+      />
+    </fieldset>
+    <fieldset class="my-2">
+      <label for="notes" class="block w-full uppercase">Notes</label>
+      <textarea 
+        id="notes" 
+        name="notes" 
+        class="w-full h-32 border-2 rounded p-2 focus:outline-none focus:ring focus:border-blue-300"
+      ></textarea>
+    </fieldset> 
+    <input 
+      type="submit" 
+      class="w-full block py-3 bg-green-400 hover:bg-green-500 transition duration-200 uppercase font-semibold cursor-pointer" 
+      value="Save Task" 
+    />
+  </form>
+  `
+  this.editForm.querySelector('#name').value = this.name;
+  this.editForm.querySelector('#notes').value = this.notes || '';
+  return this.editForm;
+}
+```
+
+After we've done that we can use this method to populate the modal when we click on the `.editTask` link
+
+```js
+else if(target.matches(".editTask")) {
+  let task = Task.findById(target.dataset.taskId);
+  Modal.populate({title: "Edit Task", content: task.edit()})
+  Modal.toggle()
+}
+```
+
+Now we should see the contents of the form filled in with the current values of the task object when we click on the edit icon.
+
+Next, we need to hook up a submit event handler to actually update the task on the backend.
+
+```js
+else if(target.matches('.editTaskForm')) {
+  e.preventDefault();
+  let task = Task.findById(target.dataset.taskId);
+  task.update(target.serialize())
+}
+```
+
+This relies on a method called serialize which I added to the HTMLFormElement prototype, allowing us to pull out the form data in an object 
+if we have access to an HTMLFormElement. I put this in `js/utilities.js`.
+
+```js
+HTMLFormElement.prototype.serialize = function() {
+  return Array.from(this.elements).reduce((data, element) => {
+    const isValidElement = element.name && element.value;
+    const isValidValue = (!['checkbox', 'radio'].includes(element.type) || element.checked);
+    const isCheckbox = element.type === 'checkbox';
+    const isMultiSelect = element.options && element.multiple;
+    const getSelectValues = element => Array.from(element.options).reduce((values, option) => {
+      return option.selected ? values.concat(option.value) : values;
+    }, []);
+    
+    if (isValidElement && isValidValue) {
+      if(isCheckbox) {
+        data[element.name] = (data[element.name] || []).concat(element.value);
+      } else if (isMultiSelect) {
+        data[element.name] = getSelectValues(element);
+      } else {
+        data[element.name] = element.value;
+      }
+    }
+
+    return data;
+  }, {}) 
+}
+```
+
+To get this to work, we need to actually have a `task.update(formData)` method.
+
+## task.update(formData)
+
+This method should accept form data and return a fetch request (promise) to update the backend with the data from the form. Upon a successful response, we should update the client side instance of task and call render on it so that its list item is updated. We should then toggle the modal so that it is no longer visible. If we get an error, we also want to toggle the modal and display the error in a flash message.
+
+```js
+/*
+task.update(formData) => {
+  1. update backend via fetch request
+  2. upon success return response parsed as JSON object, upon failure return rejected promise with error message
+  3. use successful response to update `this` object. 
+  4. Call this.render() to update the list item in the dom with the new info.
+  5. add success flash message 
+  6. upon failure, catch error and return new FlashMessage to display it.
+}
+*/
+
+update(formData) {
+  return fetch(`http://localhost:3000/tasks/${this.id}`, {
+    method: "PUT",
+    headers: {
+      "Accept": "application/json", 
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({task: formData})
+  })
+    .then(res => {
+      if(res.ok) {
+        return res.json() // returns a promise for body content parsed as JSON
+      } else {
+        return res.text().then(error => Promise.reject(error)) // return a reject promise so we skip the following then
+      }
+    })
+    .then((taskAttributes) => {
+      Object.keys(taskAttributes).forEach(attr => this[attr] = taskAttributes[attr])
+      this.render();
+      new FlashMessage({type: 'success', message: 'Task updated successfully'});
+    })
+    .catch(error => new FlashMessage({type: 'error', message: error}))
+}
+
+```
+
+This works to update a task, but the modal hangs in the browser, in order to hide it whether or not we get a successful update request, 
+we can chain a promise callback onto the update call in our event handler. 
+
+```js
+else if(target.matches('.editTaskForm')) {
+  e.preventDefault();
+  let task = Task.findById(target.dataset.taskId);
+  task.update(target.serialize())
+    .then(() => Modal.toggle())
+}
+```
+
+Finally, we want to get the modal close functionality working as well. To do this, we'll need to add another conditional to our click event handler:
+
+```js
+else if(target.matches(".modal-close") || target.matches(".modal-overlay")) {
+  e.preventDefault();
+  Modal.toggle();
+} 
+```
+
+Add the `.modal-close` to the html tags inside of the modal-close elements. This is necessary because of how we're attaching event listeners
+using the event delegation pattern. Adding the class to all of the elements that will possibly be clicked will ensure we're able to close 
+the modal.
+```html
+<div class="modal-close absolute top-0 right-0 cursor-pointer flex flex-col items-center mt-4 mr-4 text-white text-sm z-50">
+  <svg class="modal-close fill-current text-white" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+    <path d="M14.53 4.53l-1.06-1.06L9 7.94 4.53 3.47 3.47 4.53 7.94 9l-4.47 4.47 1.06 1.06L9 10.06l4.47 4.47 1.06-1.06L10.06 9z"></path>
+  </svg>
+  <span class="modal-close text-sm">(Esc)</span>
+</div>
+```
+
+```html
+<div class="flex justify-between items-center pb-3">
+  <p id="modal-title" class="text-2xl font-bold">Edit Task</p>
+  <div class="modal-close cursor-pointer z-50">
+    <svg class="modal-close fill-current text-black" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+      <path d="M14.53 4.53l-1.06-1.06L9 7.94 4.53 3.47 3.47 4.53 7.94 9l-4.47 4.47 1.06 1.06L9 10.06l4.47 4.47 1.06-1.06L10.06 9z"></path>
+    </svg>
+  </div>
+</div>
+```
+
+Finally, we need to add the keydown event listener so that the escape key will also dismiss the modal:
+
+```js
+document.addEventListener('keydown', function(evt) {
+  evt = evt || window.event
+  var isEscape = false
+  if ("key" in evt) {
+    isEscape = (evt.key === "Escape" || evt.key === "Esc")
+  } else {
+    isEscape = (evt.keyCode === 27)
+  }
+  if (isEscape && document.body.classList.contains('modal-active')) {
+    Modal.toggle()
+  }
+});
+```
+
+
+OLD MOCKUP
+```html
+Making a mockup of what you want the project to look like is a good first step
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo List</title>
+  <link href="https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css" integrity="sha512-+4zCK9k+qNFUR5X+cKL9EIR+ZOhtIloNl9GIKS57V1MyNsYpYcUrUeQc9vNfzsWfV28IaLL3i96P9sdNyeRssA==" crossorigin="anonymous" />
+</head>
+<body>
+  <div class="container mx-auto sm:grid grid-cols-3 gap-4 my-4">
+    <section id="todoListsContainer" class="px-4 bg-blue-100 sm:min-h-screen rounded-md shadow">
+      <h1 class="text-2xl semibold border-b-4 border-blue">Todo Lists</h1>
+      <form id="newTodoList" class="clearfix mt-4">
+        <input type="text" class="block float-left w-10/12 p-3" placeholder="New List" />
+        <button type="submit" class="block float-left w-2/12"><i class="fa fa-plus p-4 z--1 bg-green-400"></i></button>
+      </form>
+      <ul id="lists" class="list-none">
+        <li class="my-2 px-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6">
+          <a href="#" class="py-4 col-span-10 sm:col-span-4">My List</a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+        </li>
+        <li class="my-2 px-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6">
+          <a href="#" class="py-4 col-span-10 sm:col-span-4">My Next List</a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+        </li>
+      </ul>
+    </section>
+    <section id="tasksContainer" class="px-4 bg-blue-100 sm:min-h-screen col-span-2 rounded-md shadow">
+      <h1 class="text-2xl semibold border-b-4 border-blue">Tasks</h1>
+      <form id="newTask" class="clearfix mt-4">
+        <input type="text" class="block float-left w-11/12 p-3" placeholder="New Task" />
+        <button type="submit" class="block float-left w-1/12 px-4"><i class="fa fa-plus p-4 z--1 bg-green-400"></i></button>
+      </form>
+      <ul id="tasks" class="list-none">
+        <li class="my-2 px-4 bg-green-200 grid grid-cols-12">
+          <a href="#" class="py-4 col-span-10">My First Task</a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+          <a href="#" class="my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+        </li>
+      </ul>
+    </section>
+  </div>
+  <script src="js/models.js"></script>
+  <script src="js/listeners.js"></script>
+</body>
+</html>
+```
+
+
+# AUTHORIZATION
+
+## Adding Auth to the Project 
+
+For this, we'll be referring to the end part of this tutorial: https://github.com/dakotalmartinez/rails-devise-jwt-tutorial.
+In this section of the tutorial, we demonstrate the requests that will be sent to the backend surrounding the authentication process. What we'll be adding here is some logic to handle displaying a login/signup form in the navbar of the app or the current user's email address, depending on whether we're currently authenticated or not.
+
+First, let's add in the navbar and make space for this form to be added to the DOM:
+
+```html
+<div class="bg-green-500">
+  <navbar class="container mx-auto grid grid-cols-2 py-6">
+    <span class="text-white text-2xl font-bold">Todo</span>
+    <div id="auth"></div>
+  </navbar>
+</div>
+```
+The div with the id of auth will be where we insert the authentication form, or the current user's email address and a logout button depending on what's appropriate. If you've read through the tutorial linked above, you know that we're planning on using localStorage to persist the JWT which contains encoded information about the currently logged in user. To handle this client side, we'll want to create a class to manage the Session. This class will handle initiating requests necessary to signup, login and logout. It will also do an initial check to our API to see if we have an active session. Currently, after finishing the tutorial, we have the /signup /login and /logout routes already working (from devise). Now, we need to add a route for getting the currently logged in user.
+
+```
+rails g controller current_user
+```
+
+```rb
+# app/controllers/current_user_controller.rb
+class CurrentUserController < ApplicationController
+  before_action :authenticate_user!
+  def index
+    render json: current_user.email, status: :ok
+  end
+end
+
+# config/routes.rb 
+get 'current_user', to: 'current_user#index'
+```
+
+Now, you'll want to set up the `Auth` class with a `static init()` method that will make a request to `/current_user` and if we get no user back, add the login form to the DOM inside of the `#auth` div, if we do get a user with an active session, then display the current user's email and the logout button up in the `#auth` div. But before we get into that, we need to think a bit about the bigger picture of how authentication fit into our client side application. Currently, all of the requests that our front end code sends to the API requires data that belongs to the current_user. We've been mocking that by just returning the first user from `current_user` in the API and not actually requiring an active session within the todo_lists and tasks controllers. Now, we're going to start requiring an active session in those controllers, so we'll need to be sending an authorization header with all of our fetch requests containing the JWT that will identify the user with an active session to the API. Thus our Auth class will have the following methods:
+
+## Auth class methods
+### static init()
+Will fetch the current user using the token currently stored in localStorage. If there is an active session, it will add the email address to the navbar and a logout button as well. If there isn't one, it'll add the login form to the navbar.
+### static container()
+returns the `#auth` div where we'll be putting all of the contents.
+### static setToken(token) 
+Will store the token in localStorage and also the current time as the lastLoginTime. We do this so that if we try to get the token after more than 30 minutes have passed (our token expiration time) then we don't get anything back.
+### static getToken() 
+fetch the token out of localStorage and return it if the current time is less than 30 minutes after the last login time, otherwise return undefined.
+### static fetch(url, options)
+This method returns a promise for the parsed response of an authenticated fetch request. We'll also have a catch here that will create a new flash message displaying any errors we get back from the API. We'll replace all of our current calls to `fetch` with calls to `Auth.fetch` allowing us to skip a lot of the repetitive code and just leave the unique parts within our models.
+### static loginForm() 
+returns the form with sign in and sign up buttons. 
+### static logoutForm()
+returns the logged in user's email and a Log Out button.
+### static login(formData) 
+takes in user credentials and sends a fetch request to /login and stores the token from the response headers using `setToken()`.
+Upon success, we'll clear out the `#auth` div and replace it with the logoutForm.
+### static signup(formData) 
+takes in user credentials and sends a fetch request to /signup and stores the token from the response headers using `setToken()`. Upon success, we'll clear out the `#auth` div and replace it with the loginForm.
+### static logout()
+sends fetch request with Auth header to DELETE '/logout' and removes the token from localStorage upon a succssful response. 
+It will also replace the contents of the `#auth` div with the link to Login.
+
+## Building out the class
+
+We'll start by creating a file in `js/auth.js` and adding a script tag to load it. building out the token handling/storage logic and the fetch method that will utilize the token in the headers
+```js 
+class Auth {
+
+  static container() {
+    return this.c ||= document.querySelector('#auth');
+  }
+
+  static setToken(token) {
+    localStorage.setItem('token', token);
+    localStorage.setItem('lastLoginTime', new Date(Date.now()).getTime())
+  }
+
+  static getToken() {
+    let now = new Date(Date.now()).getTime();
+    let thirtyMinutes = 1000 * 60 * 30;
+    let timeSinceLastLogin = now - localStorage.getItem('lastLoginTime');
+    if(timeSinceLastLogin < thirtyMinutes) {
+      return localStorage.getItem('token');
+    }
+  }
+
+  static fetch(url, options) {
+    let fetchOptions = Object.assign({}, {
+      headers: {
+        "Accept": "application/json", 
+        "Content-Type": "application/json", 
+        "Authorization": this.getToken()
+      }
+    }, options)
+    return fetch(url, fetchOptions)
+      .then(res => {
+        if(res.ok) {
+          return res.json();
+        } else {
+          return res.text().then(error => Promise.reject(error));
+        }
+      })
+  }
+}
+```
+
+Now, we're going to use a modal to display the login/signup form upon clicking on a link we add to our navbar:
+
+```html
+<navbar class="container mx-auto grid grid-cols-2 py-6 px-3 sm:px-0">
+  <span class="text-white text-2xl font-bold">Todo</span>
+  <div id="auth" class="text-right">
+    <a href="#" class="loginLink">Login <i class="text-3xl loginLink fas fa-user-alt"></i></a>
+  </div>
+</navbar>
+```
+we add an event listener to handle clicking on the loginLink.
+```js
+// js/listeners.js
+if (target.matches('.loginLink')) {
+  e.preventDefault();
+  Modal.populate({title: "", content: Auth.loginForm()})
+  Modal.toggle();
+}
+```
+
+And a `loginForm()` method to our `Auth` class that will return the login form element so we can append it to the modal content before it is displayed. 
+
+```js
+// js/auth.js 
+static loginForm() {
+  this.loginFormElement ||= document.createElement("form");
+  this.loginFormElement.classList.set("authForm bg-white rounded px-8 pt-0 pb-2 mb-4");
+  this.loginFormElement.innerHTML = `
+    <h1 class="text-2xl font-bold mb-4">Login</h1>
+    <div class="mb-4">
+      <label class="block text-gray-700 text-sm font-bold mb-2" for="email">
+        Email
+      </label>
+      <input 
+        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+        id="email" 
+        type="email" 
+        name="email" 
+        placeholder="email"
+      >
+    </div>
+    <div class="mb-6">
+      <label class="block text-gray-700 text-sm font-bold mb-2" for="password">
+        Password
+      </label>
+      <input 
+        class="shadow appearance-none border border-red-500 rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline" 
+        id="password" 
+        type="password" 
+        name="password" 
+        placeholder="******************"
+      >
+      <p class="text-red-500 text-xs italic">Please choose a password.</p>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <input 
+        class="multi-submit bg-blue-500 hover:bg-blue-700 transition duration-200 text-white font-bold py-2 px-4 w-full rounded focus:outline-none focus:shadow-outline" 
+        type="submit"
+        value="Login"
+      />
+      <input 
+        class="multi-submit bg-green-500 hover:bg-green-700 transition duration-200 text-white font-bold py-2 px-4 w-full rounded focus:outline-none focus:shadow-outline" 
+        type="submit"
+        value="Signup"
+      />
+    </div>
+  `;
+  return this.loginFormElement;
+}
+```
+
+These methods will work to allow the form to be displayed in response to clicking the login icon in the top right corner of the page. Note that the two inputs of type submit have a class `multi-submit`. We do this so that we can attach a click event listener to `.multi-submit[type="submit"]` and capture form submissions that have two submit buttons. This works because submitting a form triggers a click event on the submit button before triggering the submit event. 
+
+To use this technique, you can handle normal forms with the submit event handler, but capture forms with multiple buttons by adding a `.multi-submit` class to the submit buttons allowing you to capture the event as a click event and use conditional logic to handle the form submission differently depending on which button was the target of the click. In order to have access to the form, we can use the `closest` method to find the nearest parent node that matches the `form` selector.
+
+```js
+if (target.matches('.multi-submit[type="submit"]')) {
+  e.preventDefault();
+  let form = target.closest('form');
+  if(form.matches('.authForm')) {
+    if(target.value === "Login") {
+      Auth.login(form.serialize());
+    } else if(target.value === "Signup") {
+      Auth.signup(form.serialize());
+    }
+  }
+}
+```
+
+Next, the `Auth` class will define two methods for `login` and `signup`. 
+
+```js
+static login({email, password}) {
+  return fetch('http://localhost:3000/login', {  
+    method: 'POST',
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ "user": {
+      email,
+      password
+    }})
+  })
+    .then(res => {
+      if(res.ok) {
+        this.setToken(res.headers.get('Authorization'))
+        return res.json()
+      } else {
+        return res.text().then(text => Promise.reject(text));
+      }
+    })
+    .then(({data,status}) => {
+      console.log(data.email);
+      new FlashMessage({type: 'success', message: status.message});
+      Modal.toggle();
+    })
+    .catch(({error}) => new FlashMessage({type: 'error', message: error}))
+}
+
+static signup({email, password}) {
+  return fetch('http://localhost:3000/signup', {  
+    method: 'POST',
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ "user": {
+      email,
+      password
+    }})
+  })
+    .then(res => {
+      if(res.ok) {
+        this.setToken(res.headers.get('Authorization'))
+        return res.json()
+      } else {
+        return res.text().then(text => Promise.reject(text));
+      }
+    })
+    .then(json => {
+      console.log(json)
+      Modal.toggle();
+    })
+    .catch(error => new FlashMessage(error));
+}
+```
+
+We're getting there. We just have a couple more tasks to address. 
+First, we need to make sure that the navbar shows the login link if we don't have someone logged in, then the current user's email and a logout button if we do.
+Second, we need to make sure that we don't load any todo lists unless we have a logged in user. 
+
+## Checking if someone is logged in 
+
+In order to know if we have an active session, we need to use the token in storage to make a request to our `/current_user` route. If we get a user back the we're good, and we can load the navbar with the logout button and that user's email address. if we get back a 401, then we can load up the navbar with a login link.
+
+To do this, let's add a few methods:
+
+### init() 
+this method will check for a current user and if there is one, it'll fetch all of the todo lists. We're going to replace the call to `TodoList.all()` in the `DOMContentLoaded` event handler with a call to `Auth.init()`, that way we won't try to fetch any todo lists if the user isn't logged in.
+### checkForCurrentUser() 
+returns the current user as json if we have an active session, returns 401 unauthorized if not. If we get a user, then add the `loggedInNavbar()` to the `container()`. If we don't then we put the `loggedOutNavbar()` into the `container()`.
+### loggedInNavbar()
+returns the current user's email and a logout button. 
+### loggedOutNavbar()
+returns the Login link.
+
+```js
+static init() {
+  this.getCurrentUser()
+}
+
+static getCurrentUser() {
+  return fetch('http://localhost:3000/current_user', {
+    headers: {
+      "Accept": "application/json", 
+      "Content-Type": "application/json", 
+      "Authorization": this.getToken()
+    }
+  })
+    .then(res => {
+      if(res.ok) {
+        return res.json()
+      } else {
+        throw new Error("Not logged in");
+      }
+    })
+    .then(user => {
+      Auth.current_user = user;
+      this.container().innerHTML = this.loggedInNavbar().outerHTML;
+      TodoList.all();
+    })
+    .catch(error => {
+      Auth.current_user = null;
+      this.container().innerHTML = this.loggedOutNavbar().outerHTML;
+    })
+}
+
+static loggedInNavbar() {
+  let span = document.createElement('span');
+  // span.classList.set();
+  span.innerHTML = `${Auth.current_user} <a href="#" class="logoutLink bg-blue-300 px-4 py-2">Logout</a>`
+  return span;
+}
+
+static loggedOutNavbar() {
+  let link = document.createElement('a');
+  link.href = "#";
+  link.classList.set("loginLink");
+  link.innerHTML = `Login <i class="text-3xl loginLink fas fa-user-alt"></i>`;
+  return link;
+}
+```
+
+We haven't built out logout yet, so for now let's just remove the token from localStorage to simulate being logged out. In chrome console, run 
+
+```js
+localStorage.removeItem('token')
+localStorage.removeItem('lastLoginTime')
+```
+
+Next, we'll want to make sure that the login or signup actions will do additional things:
+1. Store the current user's email in `Auth.current_user`
+2. Update the navbar with the current user's email and the logout button
+3. Toggle the modal
+4. Trigger `TodoList.all()` to load the todo lists belonging to the current user.
+
+
+```js
+static login({email, password}) {
+  return fetch('http://localhost:3000/login', {  
+    method: 'POST',
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ "user": {
+      email,
+      password
+    }})
+  })
+    .then(res => {
+      if(res.ok) {
+        this.setToken(res.headers.get('Authorization'))
+        return res.json()
+      } else {
+        return res.json().then(json => Promise.reject(json.error));
+      }
+    })
+    .then(({data}) => {
+      Auth.current_user = data.email;
+      this.container().innerHTML = this.loggedInNavbar().outerHTML;
+      Modal.toggle();
+      TodoList.all();
+    })
+    .catch(error => new FlashMessage({type: 'error', message: error}));
+}
+
+static signup({email, password}) {
+  return fetch('http://localhost:3000/signup', {  
+    method: 'POST',
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ "user": {
+      email,
+      password
+    }})
+  })
+    .then(res => {
+      if(res.ok) {
+        this.setToken(res.headers.get('Authorization'))
+        return res.json()
+      } else {
+        return res.json().then(({status}) => Promise.reject(status));
+      }
+    })
+    .then(({status, data}) => {
+      Auth.current_user = data.email;
+      this.container().innerHTML = this.loggedInNavbar().outerHTML;
+      Modal.toggle();
+      TodoList.all();
+      new FlashMessage({type: 'success', message: status.message})
+    })
+    .catch(error => new FlashMessage({type: 'error', message: error.message}));
+}
+```
+
+Now, we need to hook up the Logout button so that we can trigger the ability to log out. 
+Logout also has a few other tasks to accomplish:
+
+1. We need to remove the jwt that will be invalidated by the logout request.
+2. We need to clear out the TodoLists and tasks.
+3. We need to replace the navbar contents with the loggedOutNavbar version.
+4. We need to set the current_user to null. 
+5. Display a flash message to indicate that we logged out successfully.
+
+```js
+static revokeToken() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('lastLoginTime');
+}
+
+static logout() {
+  return fetch('http://localhost:3000/logout', {  
+    method: 'DELETE',
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Authorization": this.getToken()
+    }
+  })
+    .then(res => {
+      if(res.ok) {
+        return res.json()
+      } else {
+        return res.json().then(({message}) => Promise.reject(message));
+      }
+    })
+    .then(({message}) => {
+      this.revokeToken();
+      TodoList.container().innerHTML = '';
+      Task.container().innerHTML = '';
+      Auth.container().innerHTML = this.loggedOutNavbar().outerHTML;
+      Auth.current_user = null;
+      new FlashMessage({type: 'success', message})
+    })
+    .catch(message => new FlashMessage({type: 'error', message}));
+}
+```
+
+This should allow our users to log out and remove the todo lists and tasks from the DOM, 
+adding a flash message saying we've logged out. After this is done, the last step is to 
+rework our fetch requests so that we will be able to use the token stored in Auth and 
+make authenticated requests so we can retrieve the todo lists and tasks belonging to this
+user who's logged in. 
+
+To get everything else working correctly, we will remove the `current_user` method we 
+mocked at the beginning of the project. The current_user will be set by devise-jwt using  
+the token included in fetch requests sent using `Auth.fetch()`. 
+
+The auth code looks like this in the end:
+
+```js
+class Auth {
+  static init() {
+    this.getCurrentUser()
+  }
+
+  static container() {
+    return this.c ||= document.querySelector('#auth');
+  }
+
+  static setToken(token) {
+    localStorage.setItem('token', token);
+    localStorage.setItem('lastLoginTime', new Date(Date.now()).getTime())
+  }
+
+  static getToken() {
+    let now = new Date(Date.now()).getTime();
+    let thirtyMinutes = 1000 * 60 * 30;
+    let timeSinceLastLogin = now - localStorage.getItem('lastLoginTime');
+    if(timeSinceLastLogin < thirtyMinutes) {
+      return localStorage.getItem('token');
+    }
+  }
+
+  static revokeToken() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('lastLoginTime');
+  }
+
+  static getCurrentUser() {
+    return fetch('http://localhost:3000/current_user', {
+      headers: {
+        "Accept": "application/json", 
+        "Content-Type": "application/json", 
+        "Authorization": this.getToken()
+      }
+    })
+      .then(res => {
+        if(res.ok) {
+          return res.text()
+        } else {
+          return Promise.reject("Not logged in");
+        }
+      })
+      .then(user => {
+        Auth.current_user = user;
+        this.container().innerHTML = this.loggedInNavbar().outerHTML;
+        TodoList.all()
+      })
+      .catch(error => {
+        Auth.current_user = null;
+        this.container().innerHTML = this.loggedOutNavbar().outerHTML;
+      })
+  }
+
+  static loggedInNavbar() {
+    let span = document.createElement('span');
+    span.classList.set("block text-xl mt-1");
+    span.innerHTML = `${Auth.current_user} <a href="#" class="logoutLink bg-blue-300 px-4 py-2 inline-block ml-2">Logout</a>`
+    return span;
+  }
+
+  static loggedOutNavbar() {
+    let link = document.createElement('a');
+    link.href = "#";
+    link.classList.set("loginLink text-xl block mt-1");
+    link.innerHTML = `Login <i class="text-3xl loginLink fas fa-user-alt"></i>`;
+    return link;
+  }
+
+  static fetch(url, options) {
+    let fetchOptions = Object.assign({}, {
+      headers: {
+        "Accept": "application/json", 
+        "Content-Type": "application/json", 
+        "Authorization": this.getToken()
+      }
+    }, options)
+    return fetch(url, fetchOptions)
+      .then(res => {
+        if(res.ok) {
+          return res.json();
+        } else {
+          return res.text().then(error => Promise.reject(error));
+        }
+      })
+      .catch(error => new FlashMessage(error));
+  }
+
+  static loginForm() {
+    this.loginFormElement ||= document.createElement("form");
+    this.loginFormElement.classList.set("authForm bg-white rounded px-8 pt-0 pb-2 mb-4");
+    this.loginFormElement.innerHTML = `
+      <h1 class="text-2xl font-bold mb-4">Login</h1>
+      <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="email">
+          Email
+        </label>
+        <input 
+          class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+          id="email" 
+          type="eamil" 
+          name="email" 
+          placeholder="email"
+        >
+      </div>
+      <div class="mb-6">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="password">
+          Password
+        </label>
+        <input 
+          class="shadow appearance-none border border-red-500 rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline" 
+          id="password" 
+          type="password" 
+          name="password" 
+          placeholder="******************"
+        >
+        <p class="text-red-500 text-xs italic">Please choose a password.</p>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <input 
+          class="multi-submit bg-blue-500 hover:bg-blue-700 transition duration-200 text-white font-bold py-2 px-4 w-full rounded focus:outline-none focus:shadow-outline" 
+          type="submit"
+          value="Login"
+        />
+        <input 
+          class="multi-submit bg-green-500 hover:bg-green-700 transition duration-200 text-white font-bold py-2 px-4 w-full rounded focus:outline-none focus:shadow-outline" 
+          type="submit"
+          value="Signup"
+        />
+      </div>
+    `;
+    return this.loginFormElement;
+  }
+
+  static login({email, password}) {
+    return fetch('http://localhost:3000/login', {  
+      method: 'POST',
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ "user": {
+        email,
+        password
+      }})
+    })
+      .then(res => {
+        if(res.ok) {
+          this.setToken(res.headers.get('Authorization'))
+          return res.json()
+        } else {
+          return res.json().then(json => Promise.reject(json.error));
+        }
+      })
+      .then(({data}) => {
+        Auth.current_user = data.email;
+        this.container().innerHTML = this.loggedInNavbar().outerHTML;
+        Modal.toggle();
+        TodoList.all();
+      })
+      .catch(error => new FlashMessage({type: 'error', message: error}));
+  }
+
+  static signup({email, password}) {
+    return fetch('http://localhost:3000/signup', {  
+      method: 'POST',
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ "user": {
+        email,
+        password
+      }})
+    })
+      .then(res => {
+        if(res.ok) {
+          this.setToken(res.headers.get('Authorization'))
+          return res.json()
+        } else {
+          return res.json().then(({status}) => Promise.reject(status));
+        }
+      })
+      .then(({status, data}) => {
+        Auth.current_user = data.email;
+        this.container().innerHTML = this.loggedInNavbar().outerHTML;
+        Modal.toggle();
+        TodoList.all();
+        new FlashMessage({type: 'success', message: status.message})
+      })
+      .catch(error => new FlashMessage({type: 'error', message: error.message}));
+  }
+
+  static logout() {
+    return fetch('http://localhost:3000/logout', {  
+      method: 'DELETE',
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": this.getToken()
+      }
+    })
+      .then(res => {
+        if(res.ok) {
+          return res.json()
+        } else {
+          return res.json().then(({message}) => Promise.reject(message));
+        }
+      })
+      .then(({message}) => {
+        this.revokeToken();
+        TodoList.container().innerHTML = '';
+        Task.container().innerHTML = '';
+        Auth.container().innerHTML = this.loggedOutNavbar().outerHTML;
+        Auth.current_user = null;
+        new FlashMessage({type: 'success', message})
+      })
+      .catch(message => new FlashMessage({type: 'error', message}));
+  }
+}
+```
+
+And then the final code for the models:  
+
+```js
+class TodoList {
+  constructor(attributes) {
+    let whitelist = ["id", "name", "active"]
+    whitelist.forEach(attr => this[attr] = attributes[attr])
+    // if this list is active, store a reference to it so we can toggle its background color later on when
+    // we mark another list as the active list.
+    if(this.active) { TodoList.active = this; }
+  }
+  /*
+  TodoList.container() returns a reference to this DOM node:
+  <ul id="lists" class="list-none">
+
+  </ul>
+  */
+  static container() {
+    return this.c ||= document.querySelector('#lists')
+  }
+
+  /*
+    TodoList.all() returns a promise for the collection of all todoList objects from the API.
+    It also takes those todoLists and calls render on them, generating the li DOM nodes that 
+    display them, and spreading them out into the list where they'll be appended to the DOM.
+  */
+  static all() {
+    return Auth.fetch("http://localhost:3000/todo_lists")
+      .then(todoListsJson => {
+        this.collection = todoListsJson.map(tlAttributes => new TodoList(tlAttributes))
+        let listItems = this.collection.map(list => list.render())
+        this.container().append(...listItems)
+        return this.collection
+      })
+  }
+  /*
+  TodoList.create(formData) will post the todoList to the database, take the successful 
+  response and use it to create a new TodoList, add it to the collection, render it and
+  insert it into the list(). If there's an error, the validation message will get added.
+  */
+  static create(formData) {
+    return Auth.fetch("http://localhost:3000/todo_lists", {
+      method: 'POST',
+      body: JSON.stringify({todo_list: formData})
+    })
+      .then(json => {
+        let todoList = new TodoList(json);
+        this.collection.push(todoList);
+        this.container().appendChild(todoList.render());
+        new FlashMessage({type: 'success', message: 'TodoList added successfully'})
+        return todoList;
+      })
+  }
+  /*
+  TodoList.findById(id) will return the TodoList object that matches the id passed as an argument.
+  We'll assume here that this.collection exists because we won't be calling this method until the DOM 
+  we've clicked on an element created by one of our TodoList instances that we created and stored in 
+  this.collection when the initial fetch has completed and promise callbacks have been executed.
+  We're using == instead of === here so we can take advantage of type coercion 
+  (the dataset property on the target element will be a string, whereas the id of the TodoList will be an integer)
+  */
+  static findById(id) {
+    return this.collection.find(todoList => todoList.id == id)
+  }
+
+  /*
+  todoList.show() will make a fetch request to the show route that will use a different serializer that includes the tasks 
+  that belong to a list. Upon response, it will call toggleActive() on the todoList, adding the darker background color to 
+  the selected list and restoring the original.
+  */
+  show() {
+    return Auth.fetch(`http://localhost:3000/todo_lists/${this.id}`)
+      .then(({todo_list, tasks}) => {
+        Task.loadFromList(tasks, todo_list.id)
+        this.toggleActive();
+      })
+  }
+
+  /*
+  This method will remove the contents of the element and replace them with the form we can use to edit the
+  todo list. We'll also change the styling of our this.element li a little so it looks better within the list.
+  <li class="my-2 bg-green-200">  
+    <form class="edit-todo-list flex mt-4" data-todo-list-id=${this.id}>
+      <input type="text" class="flex-1 p-3" name="name" value="${this.name} />
+      <button type="submit" class="flex-none"><i class="fa fa-save p-4 z--1 bg-green-400"></i></button>
+    </form>
+  </li>
+  */
+  edit() {
+    // remove the current contents of the element representing this TodoList and remove grid styles
+    [this.nameLink, this.editLink, this.deleteLink].forEach(el => el.remove())
+    this.element.classList.remove(..."grid grid-cols-12 sm:grid-cols-6 pl-4".split(" "))
+    // if we've already created the form, all we need to do is make sure the value of
+    // the name input matches the current name of the todo list
+    if(this.form) {
+      this.nameInput.value = this.name;
+    } else {
+      this.form = document.createElement('form');
+      // adding the classes this way lets us copy what we'd have in our html here.
+      // we need to run split(" ") to get an array of class names individually, then we 
+      // call ... (the spread operator) on that array so we can spread out each element
+      // as a separate argument to classList, which accepts a sequence of strings as arguments
+      this.form.classList.add(..."editTodoListForm flex mt-4".split(" "));
+      this.form.dataset.todoListId = this.id;
+      // create name input 
+      this.nameInput = document.createElement('input');
+      this.nameInput.value = this.name;
+      this.nameInput.name = 'name';
+      this.nameInput.classList.add(..."flex-1 p-3".split(" "));
+      // create save button 
+      this.saveButton = document.createElement('button');
+      this.saveButton.classList.add("flex-none");
+      this.saveButton.innerHTML = `<i class="fa fa-save p-4 z--1 bg-green-400"></i>`
+
+      this.form.append(this.nameInput, this.saveButton);
+    }
+    // add the form to the empty list item.
+    this.element.append(this.form);
+    this.nameInput.focus();
+  }
+  /*
+  todoList.update(formData) will make a fetch request to update the todoList via our API, we'll take the succesful response and
+  use it to update the DOM with the new name. We'll also replace the form with the original nameLink, editLink, and deleteLink 
+  and restore the styles on the this.element li to their initial state. We'll also show a successful flash message at the top.
+  If something goes wrong, we'll hold off on removing the form and instead raise a flash error message at the top allowing the 
+  user to try again.
+  */
+  update(formData) {
+    return Auth.fetch(`http://localhost:3000/todo_lists/${this.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({todo_list: formData})
+    })
+      .then(json => {
+        //update this object with the json response
+        Object.keys(json).forEach((key) => this[key] = json[key])
+        // remove the form
+        this.form.remove();
+        // add the nameLink edit and delete links in again.
+        this.render();
+        new FlashMessage({type: 'success', message: 'TodoList updated successfully'})
+        return todoList;
+      })
+  }
+
+  delete() {
+    let proceed = confirm("Are you sure you want to delete this list?");
+    if(proceed) {
+      return Auth.fetch(`http://localhost:3000/todo_lists/${this.id}`, {
+        method: 'DELETE'
+      })
+        .then(json => {
+          //update this object with the json response
+          let index = TodoList.collection.findIndex(list => list.id == json.id);
+          TodoList.collection.splice(index, 1);
+          this.element.remove();
+          new FlashMessage({type: 'success', message: 'Todo List deleted successfully'})
+        })
+    }
+  }
+
+  /*
+  todoList.toggleActive() will toggle the background color of the previously active list to the original bg-green-200. 
+  it will then replace the original background color of the newly selected list with bg-green-400. Finally, it will mark
+  this list as the active list so we'll be able to switch its color back to the original when another list is selected.
+  */
+  toggleActive() {
+    // only toggle the active list's background color if there is an active list.
+    if(TodoList.active) { 
+      TodoList.active.element.classList.replace("bg-green-400", "bg-green-200");
+      TodoList.active.active = false; // update the active property of previously active list to false
+    }
+    // make this one darker and mark it as the currently active list
+    this.element.classList.replace("bg-green-200", "bg-green-400");
+    TodoList.active = this;
+  }
+
+  /*
+  <li class="my-2 px-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6">
+    <a href="#" class="py-4 col-span-10 sm:col-span-4">My List</a>
+    <a href="#" class="editList my-4 text-right"><i class="fa fa-pencil-alt"></i></a>
+    <a href="#" class="deleteList my-4 text-right"><i class="fa fa-trash-alt"></i></a>
+  </li>
+  */
+  render() {
+    this.element ||= document.createElement('li');
+
+    this.element.classList.add(..."my-2 pl-4 bg-green-200 grid grid-cols-12 sm:grid-cols-6".split(" "));
+    this.nameLink ||= document.createElement('a');
+    this.nameLink.classList.add(..."selectTodoList py-4 col-span-10 sm:col-span-4 cursor-pointer".split(" "));
+    this.nameLink.dataset.todoListId = this.id;
+    this.nameLink.textContent = this.name;
+    // only create the edit and delete links if we don't already have them
+    if(!this.editLink) {
+      this.editLink = document.createElement('a');
+      this.editLink.classList.add(..."my-1".split(" "));
+      this.editLink.innerHTML = `<i class="fa fa-pencil-alt editTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+      this.deleteLink = document.createElement('a');
+      this.deleteLink.classList.add(..."my-1".split(" "));
+      this.deleteLink.innerHTML = `<i class="fa fa-trash-alt deleteTodoList p-4 cursor-pointer" data-todo-list-id="${this.id}"></i>`;
+    }
+
+    this.element.append(this.nameLink, this.editLink, this.deleteLink);
+    return this.element;
+  }
+
+}
+
+class Task {
+  constructor(attributes) {
+    let whitelist = ["id", "name", "todo_list_id", "completed", "notes"]
+    whitelist.forEach(attr => this[attr] = attributes[attr])
+  }
+  /*
+  <ul id="tasks" class="list-none">
+    
+  </ul>
+  */
+  static container() {
+    return this.c = document.querySelector("#tasks")
+  }
+
+  /*
+  Task.all() returns an object with keys of todo_list_id and the values are arrays of task instances.
+  */
+  static all() {
+    return this.collection ||= {};
+  }
+
+  /*
+  Task.findById(id) => returns a task within Task.all() at the key of the active_todo_list_id that matches the id 
+  */
+  static findById(id) {
+    let result = this.all()[Task.active_todo_list_id].find(task => task.id == id);
+    return result ? result : new FlashMessage({type: "error", message: "Task not found."})
+  }
+
+  /*
+  Task.loadFromList(tasks, todo_list_id) will accept an array of task attributes and a todo_list_id. It will create Tasks 
+  having the attributes in the array, store them in the this.collection object under the key matching the todo_list_id.
+  It also renders all of them and replaces the contents of the container with the rendered task elements. It also stores 
+  the todo_list_id as a property of the class so it'll be accessible when we submit the form to create a new task.
+  */
+  static loadFromList(tasks, todo_list_id) {
+    let taskObjects = tasks.map(attrs => new Task(attrs));
+    this.all()[todo_list_id] = taskObjects;
+    this.active_todo_list_id = todo_list_id;
+    let taskElements = taskObjects.map(task => task.render());
+    this.container().innerHTML = "";
+    this.container().append(...taskElements);
+  }
+
+  /*
+  Task.create(formData) will: 
+  accept form data as an argument
+  make a fetch request with that formData to create the new task via the API 
+  check if the response is ok, and if it is
+  parse the response as a JSON formatted string and pass the parsed value to the next callback
+  take the js data structure in the next callback and use it to create a new instance of Task client side 
+  store the instance in this.collection
+  call render on the instance creating the node that will represent it in the DOM 
+  append the created instance to this.container() 
+  if the respose is not ok, we will parse it as text, consume that promise with a then callback which returns a rejected promise for the error from the API 
+  catch the error with another callback which uses it to create a new FlashMessage which will be displayed in section#flash
+  */
+  static create(formData) {
+    formData.todo_list_id = Task.active_todo_list_id;
+    return Auth.fetch('http://localhost:3000/tasks', {
+      method: 'POST', 
+      body: JSON.stringify({task: formData})
+    })
+      .then(taskAttributes => {
+        let task = new Task(taskAttributes);
+        this.collection[this.active_todo_list_id].push(task);
+        let rendered = task.render();
+        this.container().appendChild(rendered);
+        return task;
+      })
+  }
+
+  /*
+  task.toggleComplete() will make a fetch request and update the complete attribute of the task 
+  it will then update the client side copy and call render on it to update the icon.
+  */
+  toggleComplete() {
+    return Auth.fetch(`http://localhost:3000/tasks/${this.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({task: {completed: !this.completed }})
+    })
+      .then(taskAttributes => {
+        Object.keys(taskAttributes).forEach(attr => this[attr] = taskAttributes[attr]);
+        this.render();
+      })
+  }
+
+  /*
+  task.completeIconClass() returns the class indicating whether the icon should be a checked circle or an empty one.
+  */
+  completeIconClass() {
+    return this.completed ? 'fa-check-circle' : 'fa-circle';
+  }
+
+  /*
+  task.edit() creates an edit task form element and adds it as modal content. Then calls Modal.toggle() to display it.
+  */
+  edit() {
+    Modal.populate({title: "Edit Task", content: this.editTaskForm()})
+    Modal.toggle();
+  }
+
+  editTaskForm() {
+    this.editForm ||= document.createElement('form');
+    this.editForm.classList.set("editTaskForm mt-4");
+    this.editForm.dataset.taskId = this.id;
+
+    this.nameLabel ||= document.createElement('label');
+    this.nameLabel.classList.set('flex flex-col');
+    this.nameSpanEdit ||= document.createElement('span');
+    this.nameSpanEdit.textContent = "Name";
+    this.nameSpanEdit.classList.set("uppercase semibold my-2")
+    this.nameLabel.append(this.nameSpanEdit);
+    this.nameInput ||= document.createElement('input');
+    this.nameInput.type = "text";
+    this.nameInput.value = this.name;
+    this.nameInput.name = 'name';
+    this.nameInput.classList.set("flex-1 p-3 bg-gray-200 rounded focus:outline-none focus:shadow-outline focus:border-blue-300");
+
+    this.nameLabel.append(this.nameInput);
+
+    this.notesLabel ||= document.createElement('label');
+    this.notesLabel.classList.set('flex flex-col');
+    this.notesSpanEdit ||= document.createElement('span');
+    this.notesSpanEdit.textContent = "notes";
+    this.notesSpanEdit.classList.set("uppercase semibold my-2")
+    this.notesLabel.append(this.notesSpanEdit);
+    this.notesInput ||= document.createElement('textarea');
+    this.notesInput.classList.set('flex-1 p-3 mb-2 bg-gray-200 min-h-12 rounded focus:outline-none focus:shadow-outline focus:border-blue-300 resize-y');
+    this.notesInput.rows = 4;
+    this.notesInput.textContent = this.notes;
+    this.notesInput.name="notes";
+    this.notesLabel.append(this.notesInput);
+
+    this.saveTaskButton ||= document.createElement('button');
+    this.saveTaskButton.classList.set('w-full bg-green-400 my-4 py-3 uppercase font-bold hover:bg-green-500 transition duration-500');
+    this.saveTaskButton.type = "submit";
+    this.saveTaskButton.textContent = "Save Task";
+
+    this.editForm.append(this.nameLabel, this.notesLabel, this.saveTaskButton);
+
+    return this.editForm;
+  }
+
+  /*
+  task.update(formData) will make a fetch request to update the task via our API, 
+  we'll take the succesful response and use it to update the DOM with the new name.
+  We'll toggle (hide) the modal in response to the form submission. 
+  We'll also show a successful flash message at the top. If something goes wrong, we'll hold off 
+  on removing the form and instead raise a flash error message at the top allowing the 
+  user to try again.
+  */
+  update(formData) {
+    return Auth.fetch(`http://localhost:3000/tasks/${this.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({task: formData})
+    })
+      .then(json => {
+        //update this object with the json response
+        Object.keys(json).forEach((key) => this[key] = json[key])
+        // remove the form
+        this.editForm.remove();
+        // add the nameLink edit and delete links in again.
+        this.render();
+        Modal.toggle();
+        new FlashMessage({type: 'success', message: 'Task updated successfully'})
+        return todoList;
+      })
+  }
+
+  delete() {
+    let proceed = confirm("Are you sure you want to delete this task?");
+    if(proceed) {
+      return Auth.fetch(`http://localhost:3000/tasks/${this.id}`, {
+        method: 'DELETE'
+      })
+        .then(json => {
+          //update this object with the json response
+          let index = Task.collection[Task.active_todo_list_id].findIndex(task => task.id == json.id);
+          Task.collection[Task.active_todo_list_id].splice(index, 1);
+          this.element.remove();
+          new FlashMessage({type: 'success', message: 'Task deleted successfully'})
+        })
+        .catch(error => {
+          new FlashMessage({type: 'error', message: error});
+        })
+    }
+  }
+
+  /*
+  <li class="my-2 px-4 bg-green-200 grid grid-cols-12">
+    <a href="#" class="my-1 text-center"><i class="p-4 far fa-circle"></i></a>
+    <span class="py-4 col-span-9">My First Task</span>
+    <a href="#" class="my-1 text-right"><i class="p-4 fa fa-pencil-alt"></i></a>
+    <a href="#" class="my-1 text-right"><i class="p-4 fa fa-trash-alt"></i></a>
+  </li>
+  */
+  render() {
+    this.element ||= document.createElement('li');
+    this.element.classList.set("my-2 px-1 bg-green-200 grid grid-cols-12");
+
+    this.completeLink ||= document.createElement('a');
+    this.completeLink.classList.set("my-1 text-center");
+    this.completeLink.innerHTML = `<i class="p-4 far ${this.completeIconClass()} toggleComplete" data-task-id="${this.id}"></i>`
+
+    this.nameSpan ||= document.createElement('a');
+    this.nameSpan.classList.set("editTask py-4 col-span-9");
+    this.nameSpan.dataset.taskId = this.id;
+    this.nameSpan.textContent = this.name;
+    // only create the edit and delete links if we don't already have them
+    if(!this.editLink) {
+      this.editLink = document.createElement('a');
+      this.editLink.classList.set("my-1");
+      this.editLink.innerHTML = `<i class="fa fa-pencil-alt editTask modal-open p-4 cursor-pointer" data-task-id="${this.id}"></i>`;
+      this.deleteLink = document.createElement('a');
+      this.deleteLink.classList.set("my-1");
+      this.deleteLink.innerHTML = `<i class="fa fa-trash-alt deleteTask p-4 cursor-pointer" data-task-id="${this.id}"></i>`;
+    }
+
+    this.element.append(this.completeLink, this.nameSpan, this.editLink, this.deleteLink);
+    return this.element;
+  }
+}
+```
+
+
+# README
+
+This README would normally document whatever steps are necessary to get the
+application up and running.
+
+Things you may want to cover:
+
+* Ruby version
+
+* System dependencies
+
+* Configuration
+
+* Database creation
+
+* Database initialization
+
+* How to run the test suite
+
+* Services (job queues, cache servers, search engines, etc.)
+
+* Deployment instructions
+
+* ...

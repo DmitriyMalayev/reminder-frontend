@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reminders Projects</title>
+  <link href="https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css"
+    integrity="sha512-+4zCK9k+qNFUR5X+cKL9EIR+ZOhtIloNl9GIKS57V1MyNsYpYcUrUeQc9vNfzsWfV28IaLL3i96P9sdNyeRssA=="
+    crossorigin="anonymous" />
+</head>
+
+<body style="background-color:rgb(182, 216, 255);">
+  <div class="container mx-auto sm:grid grid-cols-3 gap-4 my-4">
+    <section id="flash" class="bg-red-200 h-10 col-span-3 py-2 pl-4 opacity-0 transition-opacity duration-700">Error
+      Message
+    </section>
+    <section id="calendarListsContainer" class="px-4 bg-blue-800 sm:min-h-screen rounded-md shadow">
+      <form id="reminder_form"
+        class="px-4 bg-gradient-to-r from-orange-400 via-orange-300 to-orange-200 sm:min-h-screen rounded-md shadow">
+        <h1 class="text-2xl text-green-900 font-semibold">Reminder Form</h1>
+        <fieldset class="my-1">
+          <strong><label for="name">Name</label> <br /></strong>
+          <input type="text" class="w-full" name="name" autofocus placeholder="Type A Title Here" />
+        </fieldset>
+        <fieldset class="my-1">
+          <strong><label for="notes">Notes</label></strong> <br />
+          <textarea name="notes_input" id="notes" class="w-full h-16" autofocus
+            placeholder="Type Notes Here"></textarea>
+        </fieldset>
+        <fieldset class="my-1">
+          <strong> <label for="DateTime">Start Time</label></strong> <br />
+          <input type="datetime-local" name="start_time" id="datetime" class="w-full" />
+        </fieldset>
+        <fieldset class="my-1">
+          <strong> <label for="DateTime">End Time</label></strong> <br />
+          <input type="datetime-local" name="end_time" id="datetime" class="w-full" />
+        </fieldset>
+        <fieldset class="my-1">
+          <strong><label for="calendars">Choose a Calendar:</label></strong>
+          <select name="calendar_id" id="calendars">
+          </select>
+        </fieldset>
+        <input type="submit" value="submit" name="submit" class="block w-full mt-2 bg-black text-white" />
+        <input type="reset" value="reset" name="reset" id="reset" class="block w-full mt-2 bg-red-500 text-white" />
+      </form>
+    </section>
+    <section id="eventContainer"
+      class="px-4 bg-gradient-to-r from-orange-200 via-orange-300 to-orange-400 sm:min-h-screen rounded-md shadow">
+      <h1 class="text-2xl text-green-900 font-semibold">Reminders For Events</h1>
+      <div id="events">
+        </div>
+    </section>
+  </div>
+
+  
+  <script src="js/models.js"></script>
+  <script src="js/listeners.js"></script>
+</body>
+
+</html>
+<!-- 
+TypeError: Cannot create property 'innerText' on string '2021-01-15T14:03:00.000Z' -->
