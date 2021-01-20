@@ -67,9 +67,6 @@ class Calendar {
   }
 }
 
-
-
-
 class Event {
   constructor(attributes) {
     let allowed = ["name", "start_time", "end_time", "notes", "calendar_title"];
@@ -136,7 +133,7 @@ class Event {
         // events[1].calendar_title
         this.collection = events.map((event) => new Event(event));
         let renderedEvents = this.collection.map((event) => event.render());
-        
+
         this.container().append(...renderedEvents); //separated arguments from array because .append requires it
         return this.collection; //Returning a Promise for the collection because we might want to use it
       });
@@ -144,16 +141,32 @@ class Event {
 
   render() {
     // if(this.calendar_title == "Personal"){
-    this.element ||= document.createElement("div")
+    this.element ||= document.createElement("div");
 
+    // this.element.className = "border-solid md:border-dotted";
     this.nameLink ||= document.createElement("li");
     this.nameLink.innerText = this.name;
+    this.nameLink.style.fontWeight = "bold";
+
+    this.editLink ||= document.createElement("a");
+    this.editLink.innerHTML = ` <i class="far fa-edit p-1 "></i>`;
+
+    this.deleteLink ||= document.createElement("a");
+    this.deleteLink.innerHTML = ` <i class="far fa-trash-alt p-1 "></i>`;
+
+    this.nameLink.append(this.editLink, this.deleteLink);
 
     this.start_time_li ||= document.createElement("li");
-    this.start_time_li.innerText = this.start_time;
+    this.start_time_li.innerText =
+      new Date(this.start_time).toDateString() +
+      " at " +
+      new Date(this.start_time).toLocaleTimeString();
 
     this.end_time_li ||= document.createElement("li");
-    this.end_time_li.innerText = this.end_time;
+    this.end_time_li.innerText =
+      new Date(this.end_time).toDateString() +
+      " at " +
+      new Date(this.end_time).toLocaleTimeString();
 
     this.notes_li ||= document.createElement("li");
     this.notes_li.innerText = this.notes;
@@ -166,8 +179,9 @@ class Event {
       this.element.style.color = "black";
     }
 
-    const newEvent = document.createElement("ul");
-    newEvent.style.border = "1px solid white";
+    let newEvent = document.createElement("ul");
+    newEvent.style.border = "1px solid blue";
+    newEvent.classList.add("p-2");
     newEvent.append(
       this.nameLink,
       this.notes_li,

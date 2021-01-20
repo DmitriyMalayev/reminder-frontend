@@ -1,3 +1,16 @@
+
+# Serializer can convert objects into a serialized hash or serialized JSON 
+# attribute defines a single attribute  
+
+
+
+
+
+
+
+
+
+
 # MY NOTES 
 `Serialization`
 This is the process where an Object or Data Structure is translated into a format suitable for transferral over a network or storage.
