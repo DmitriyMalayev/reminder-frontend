@@ -28,10 +28,20 @@ document.addEventListener("submit", function (e) {
   }
 });
 
-document.getElementById("resets").addEventListener("click", function (e) {
+document.addEventListener("click", function (e) {
   let target = e.target;
-  if (target.matches("reminder_form")) {
-    e.preventDefault();
-    document.getElementById("reminder_form").reset();
+  if (target.matches(".deleteEvent")) {
+    if (
+      confirm("Are you sure you want to delete this reminder for an event?")
+    ) {
+      let eventReminder = Event.findById(target.dataset.eventId);
+
+      eventReminder.delete();
+    }
   }
+});
+
+document.getElementById("resets").addEventListener("click", function (e) {
+  e.preventDefault();
+  document.getElementById("reminder_form").reset();
 });

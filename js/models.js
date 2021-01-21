@@ -69,7 +69,7 @@ class Calendar {
 
 class Event {
   constructor(attributes) {
-    let allowed = ["name", "start_time", "end_time", "notes", "calendar_title"];
+    let allowed = ["id", "name", "start_time", "end_time", "notes", "calendar_title"];
     allowed.forEach((attr) => (this[attr] = attributes[attr]));
   }
 
@@ -139,6 +139,40 @@ class Event {
       });
   }
 
+  static findById(id) {
+    //Getting an event via javascript. Returns Object  ??
+    return this.collection.find((event) => event.id == id);
+  }
+
+  delete() {
+    fetch(`http://localhost:3000/events/${this.id}`, { 
+      method: "DELETE", 
+    })
+    .then(() => {
+      let index = Event.collection.findIndex((event) => event.id == this.id)
+      Event.collection.splice(index, 1)
+      this.element.remove()
+    })
+}
+
+
+  // delete() {
+  //   return Auth.fetch(`http://localhost:3000/todo_lists/${this.id}`, {
+  //     method: "DELETE",
+  //   })
+  //     .then(({ id }) => {
+  //       let index = TodoList.collection.findIndex((task) => task.id == id);
+  //       TodoList.collection.splice(index, 1);
+  //       j;
+  //       this.element.remove();
+  //       if (id == Task.active_todo_list_id) {
+  //         Task.container().innerHTML = `<li class="my-2 p-4">Select a Todo List to see tasks</li>`;
+  //       }
+  //       return this;
+  //     })
+  //     .catch((error) => new FlashMessage({ type: "error", message: error }));
+  // }
+
   render() {
     // if(this.calendar_title == "Personal"){
     this.element ||= document.createElement("div");
@@ -152,7 +186,7 @@ class Event {
     this.editLink.innerHTML = ` <i class="far fa-edit p-1 "></i>`;
 
     this.deleteLink ||= document.createElement("a");
-    this.deleteLink.innerHTML = ` <i class="far fa-trash-alt p-1 "></i>`;
+    this.deleteLink.innerHTML = ` <i class="far fa-trash-alt p-1 deleteEvent" data-event-id="${this.id}"></i>`;
 
     this.nameLink.append(this.editLink, this.deleteLink);
 
