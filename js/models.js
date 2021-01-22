@@ -1,37 +1,43 @@
 class Calendar {
-  constructor(attributes) {
-    let allowed = ["id", "title"];
-    allowed.forEach((attr) => (this[attr] = attributes[attr]));
+  constructor(attributes) {   
+    let whiteList = ["id", "title"];
+      whiteList.forEach((attr) => (this[attr] = attributes[attr]));
   }
+// The constructor method is a special method of a class for creating and initializing an object of that class.
+// In the constructor we have a whitelisted group of attributes, we iterate over the whitelist and for each attribute we pull out the value of this.attributes object that we use to build a new calendar and store it as a property of this object which is the object we're creating when we make a new to do list. 
+
   static container() {
-    return (this.c ||= document.querySelector("#calendars"));
+    return (this.c ||= document.querySelector("#calendars"));  
   }
+//Selects the calendars id and assigns it to this.c 
+//If it's already assigned it uses it to store all of the calendars.  
 
   static all() {
-    return fetch("http://localhost:3000/calendars", {
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
+    return fetch("http://localhost:3000/calendars", {  
+      headers: {   //Stating what we want to accept 
+        Accept: "application/json",   //Kind of response we want to accept      
+        "Content-Type": "application/json",   //The Content-Type we want to accept 
       },
     })
-      .then((response) => {
-        if (response.ok) {
+      .then((response) => {   //Promise callback 
+        if (response.ok) { 
           return response.json(); //returns a promise for body content parsed as JSON
         } else {
           return response.text().then((error) => Promise.reject(error));
           //returns a rejected promise so we skip the following then and go to catch.  res.text also returns a promise.
         }
       })
-      .then((calendarArray) => {
+      .then((calendarArray) => { 
         this.collection = calendarArray.map((attrs) => new Calendar(attrs));
         let renderedCalendars = this.collection.map((calendar) =>
           calendar.render()
         );
         this.container().append(...renderedCalendars); //separated arguments from array because .append requires it
         return this.collection; //Returning a Promise for the collection because we might want to use it
+        //renderedCalendars is an array of dom nodes, and append expects a series of one or more dom nodes as arguments not in the form of an array. If we spread out the contents of an array it works. 
       });
-  }
 
+  } 
   static findWithId(id) {
     //Getting an event via javascript. Returns Object  ??
     return this.collection.find((calendar) => calendar.id == id);
@@ -69,7 +75,14 @@ class Calendar {
 
 class Event {
   constructor(attributes) {
-    let allowed = ["id", "name", "start_time", "end_time", "notes", "calendar_title"];
+    let allowed = [
+      "id",
+      "name",
+      "start_time",
+      "end_time",
+      "notes",
+      "calendar_title",
+    ];
     allowed.forEach((attr) => (this[attr] = attributes[attr]));
   }
 
@@ -145,50 +158,26 @@ class Event {
   }
 
   delete() {
-    fetch(`http://localhost:3000/events/${this.id}`, { 
-      method: "DELETE", 
-    })
-    .then(() => {
-      let index = Event.collection.findIndex((event) => event.id == this.id)
-      Event.collection.splice(index, 1)
-      this.element.remove()
-    })
-}
-
-
-  // delete() {
-  //   return Auth.fetch(`http://localhost:3000/todo_lists/${this.id}`, {
-  //     method: "DELETE",
-  //   })
-  //     .then(({ id }) => {
-  //       let index = TodoList.collection.findIndex((task) => task.id == id);
-  //       TodoList.collection.splice(index, 1);
-  //       j;
-  //       this.element.remove();
-  //       if (id == Task.active_todo_list_id) {
-  //         Task.container().innerHTML = `<li class="my-2 p-4">Select a Todo List to see tasks</li>`;
-  //       }
-  //       return this;
-  //     })
-  //     .catch((error) => new FlashMessage({ type: "error", message: error }));
-  // }
+    fetch(`http://localhost:3000/events/${this.id}`, {
+      method: "DELETE",
+    }).then(() => {
+      let index = Event.collection.findIndex((event) => event.id == this.id);
+      Event.collection.splice(index, 1);
+      this.element.remove();
+    });
+  }
 
   render() {
-    // if(this.calendar_title == "Personal"){
     this.element ||= document.createElement("div");
 
-    // this.element.className = "border-solid md:border-dotted";
     this.nameLink ||= document.createElement("li");
     this.nameLink.innerText = this.name;
     this.nameLink.style.fontWeight = "bold";
 
-    this.editLink ||= document.createElement("a");
-    this.editLink.innerHTML = ` <i class="far fa-edit p-1 "></i>`;
-
     this.deleteLink ||= document.createElement("a");
     this.deleteLink.innerHTML = ` <i class="far fa-trash-alt p-1 deleteEvent" data-event-id="${this.id}"></i>`;
 
-    this.nameLink.append(this.editLink, this.deleteLink);
+    this.nameLink.append(this.deleteLink);
 
     this.start_time_li ||= document.createElement("li");
     this.start_time_li.innerText =
