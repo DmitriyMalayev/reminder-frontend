@@ -3,20 +3,11 @@ document.addEventListener("DOMContentLoaded", function (e) {
   Event.all();
 });
 
-document.addEventListener("click", function (e) {
-  let target = e.target;
-  if (target.matches(".selectCalendar")) {
-    let calendar = Calendar.findById(target.dataset.calendarId);
-    calendar.show();
-    console.log("selected calendar", target.dataset);
-  }
-});
-
 document.addEventListener("submit", function (e) {
   let target = e.target;
   if (target.matches("#reminder_form")) {
     e.preventDefault();
-    let formData = {};
+    let formData = {};    //Make a let variable 
     formData.name = target.name.value;
     formData.start_time = target.start_time.value;
     formData.end_time = target.end_time.value;
@@ -45,3 +36,16 @@ document.getElementById("resets").addEventListener("click", function (e) {
   e.preventDefault();
   document.getElementById("reminder_form").reset();
 });
+
+
+
+
+// document.addEventListener("click", function (e) {
+//   let target = e.target;
+//   if (target.matches(".selectCalendar")) {
+//     debugger 
+//     let calendar = Calendar.findById(target.dataset.calendarId);
+//     calendar.show();
+//     console.log("selected calendar", target.dataset);
+//   }
+// });
