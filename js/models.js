@@ -3,31 +3,23 @@ class Calendar {
     let whiteList = ["id", "title"];
     whiteList.forEach((attr) => (this[attr] = attributes[attr]));
   }
-  // The constructor method is a special method of a class for creating and initializing an object of that class.
-  // In the constructor we have a whitelisted group of attributes, we iterate over the whitelist and for each attribute we pull out the value of this.attributes object that we use to build a new calendar and store it as a property of this object which is the object we're creating when we make a new to do list.
 
   static container() {
     return (this.c ||= document.querySelector("#calendars"));
   }
-  //Selects the calendars id and assigns it to this.c
-  //If it's already assigned it uses it to store all of the calendars.
 
   static all() {
     return fetch("http://localhost:3000/calendars", {
-      //GET request by default
       headers: {
-        //Stating what we want to accept
-        Accept: "application/json", //Kind of response we want to accept
-        "Content-Type": "application/json", //The Content-Type we want to accept
+        Accept: "application/json",
+        "Content-Type": "application/json",
       },
     })
       .then((response) => {
-        //Promise callback
         if (response.ok) {
-          return response.json(); //returns a promise for body content parsed as JSON
+          return response.json();
         } else {
           return response.text().then((error) => Promise.reject(error));
-          //returns a rejected promise so we skip the following then and go to catch.  res.text also returns a promise.
         }
       })
       .then((calendarArray) => {
@@ -35,13 +27,11 @@ class Calendar {
         let renderedCalendars = this.collection.map((calendar) =>
           calendar.render()
         );
-        this.container().append(...renderedCalendars); //separated arguments from array because .append requires it
-        return this.collection; //Returning a Promise for the collection because we might want to use it
-        //renderedCalendars is an array of dom nodes, and append expects a series of one or more dom nodes as arguments not in the form of an array. If we spread out the contents of an array it works.
+        this.container().append(...renderedCalendars);
+        return this.collection;
       });
   }
   static findWithId(id) {
-    //Getting an event via javascript. Returns Object  ??
     return this.collection.find((calendar) => calendar.id == id);
   }
 
@@ -66,7 +56,6 @@ class Calendar {
   }
 
   render() {
-    //creates a option. This is an instance method
     this.element ||= document.createElement("option");
     this.element.value = this.id;
     this.element.textContent = this.title;
@@ -93,7 +82,6 @@ class Event {
   }
 
   static create(formData) {
-    //POST requests require a second argument
     return fetch("http://localhost:3000/events", {
       method: "POST",
       headers: {
@@ -104,20 +92,18 @@ class Event {
     })
       .then((res) => {
         if (res.ok) {
-          return res.json(); //returns a promise for body content parsed as JSON
+          return res.json();
         } else {
           return res.text().then((errors) => Promise.reject(errors));
-          //returns a rejected promise so we skip the following then and go to catch. res.text also returns a promise.
         }
       })
       .then((json) => {
         let event = new Event(json);
-        // this.collection.push(event);
         this.container().appendChild(event.render());
         new FlashMessage({
           type: "success",
           message: "New Event Added",
-        }); //Event or Event??
+        });
         return event;
       })
       .catch((error) => {
@@ -125,7 +111,6 @@ class Event {
           type: "error",
           message: error,
         });
-        // new FlashMessage({type: "error", message: error})  //can the error message be replaced??
       });
   }
 
@@ -138,26 +123,21 @@ class Event {
     })
       .then((response) => {
         if (response.ok) {
-          return response.json(); //returns a promise for body content parsed as JSON
+          return response.json();
         } else {
           return response.text().then((error) => Promise.reject(error));
-          //returns a rejected promise so we skip the following then and go to catch.  res.text also returns a promise.
         }
       })
       .then((events) => {
-        // events[1].calendar_title
         this.collection = events.map((event) => new Event(event));
         let renderedEvents = this.collection.map((event) => event.render());
 
-        this.container().append(...renderedEvents); //separated arguments from array because .append requires it
-        return this.collection; //Returning a Promise for the collection because we might want to use it
+        this.container().append(...renderedEvents);
+        return this.collection;
       });
   }
 
-  // Spread syntax (...) allows an iterable such as an array expression or string to be expanded in places where zero or more arguments (for function calls) or elements (for array literals) are expected, or an object expression to be expanded in places where zero or more key-value pairs (for object literals) are expected.
-
   static findById(id) {
-    //Getting an event via javascript. Returns Object  ??
     return this.collection.find((event) => event.id == id);
   }
 

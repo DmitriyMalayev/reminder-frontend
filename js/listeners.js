@@ -36,16 +36,3 @@ document.getElementById("resets").addEventListener("click", function (e) {
   e.preventDefault();
   document.getElementById("reminder_form").reset();
 });
-
-
-
-
-// document.addEventListener("click", function (e) {
-//   let target = e.target;
-//   if (target.matches(".selectCalendar")) {
-//     debugger 
-//     let calendar = Calendar.findById(target.dataset.calendarId);
-//     calendar.show();
-//     console.log("selected calendar", target.dataset);
-//   }
-// });
